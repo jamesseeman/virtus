@@ -132,7 +132,7 @@ impl Request {
                     ..Default::default()
                 }));
 
-
+                // todo: replace virtus-int with parameterized bridge name
                 self.params.push(Param::Op(Op {
                     op: String::from("mutate"),
                     table: String::from("Bridge"),
@@ -218,7 +218,7 @@ impl Request {
                     ))]),
                     ..Default::default()
                 }));
- 
+
                 self.params.push(Param::Op(Op {
                     op: String::from("delete"),
                     table: obj.get_table(),
@@ -229,7 +229,7 @@ impl Request {
                     ))]),
                     ..Default::default()
                 }));
-           }
+            }
             _ => {
                 self.params.push(Param::Op(Op {
                     op: String::from("delete"),

@@ -29,7 +29,7 @@ impl TryFrom<Vec<u8>> for Response {
     type Error = VirtusError;
 
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
-        println!("{}", String::from_utf8_lossy(&value));
+        //println!("{}", String::from_utf8_lossy(&value));
         let value_str = std::str::from_utf8(&value)?;
         let response: Response = serde_json::from_str(value_str)?;
         //println!("{:?}", response);
