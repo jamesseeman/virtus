@@ -17,6 +17,7 @@ fn main() {
     let new_id = ovs_conn.create(&mut new_port).expect("failed to create port");
     println!("{}", new_id);
 
+    ovs_conn.delete(new_port).expect("failed to delete bridge");
    
     /*
     let new_id = ovs_conn.create(&mut bridge).expect("failed to create bridge");

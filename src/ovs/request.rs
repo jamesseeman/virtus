@@ -107,6 +107,21 @@ impl Request {
             "Port" => {
                 self.params.push(Param::Op(Op {
                     op: String::from("insert"),
+                    table: obj.get_table(),
+                    row: Some(Row {
+                        name: obj.get_name(),
+                        interfaces: Some((
+                            String::from("named-uuid"),
+                            String::from("new_interface"),
+                        )),
+                        ..Default::default()
+                    }),
+                    uuid_name: Some(String::from("new_port")),
+                    ..Default::default()
+                }));
+
+                self.params.push(Param::Op(Op {
+                    op: String::from("insert"),
                     table: String::from("Interface"),
                     row: Some(Row {
                         name: obj.get_name(),
@@ -117,18 +132,6 @@ impl Request {
                     ..Default::default()
                 }));
 
-
-                self.params.push(Param::Op(Op {
-                    op: String::from("insert"),
-                    table: obj.get_table(),
-                    row: Some(Row {
-                        name: obj.get_name(),
-                        interfaces: Some((String::from("named-uuid"), String::from("new_interface"))),
-                        ..Default::default()
-                    }),
-                    uuid_name: Some(String::from("new_port")),
-                    ..Default::default()
-                }));
 
                 self.params.push(Param::Op(Op {
                     op: String::from("mutate"),
@@ -163,29 +166,82 @@ impl Request {
     }
 
     pub fn delete<T: Object>(mut self, obj: &T) -> Self {
-        self.params.push(Param::Op(Op {
-            op: String::from("delete"),
-            table: obj.get_table(),
-            r#where: Some(vec![OpCondition::Nested((
-                String::from("_uuid"),
-                String::from("=="),
-                (String::from("uuid"), obj.get_uuid().unwrap()),
-            ))]),
-            ..Default::default()
-        }));
+        match obj.get_table().as_str() {
+            "Bridge" => {
+                self.params.push(Param::Op(Op {
+                    op: String::from("delete"),
+                    table: obj.get_table(),
+                    r#where: Some(vec![OpCondition::Nested((
+                        String::from("_uuid"),
+                        String::from("=="),
+                        (String::from("uuid"), obj.get_uuid().unwrap()),
+                    ))]),
+                    ..Default::default()
+                }));
 
-        if obj.get_table() == "Bridge" {
-            self.params.push(Param::Op(Op {
-                op: String::from("mutate"),
-                table: String::from("Open_vSwitch"),
-                r#where: Some(vec![]),
-                mutations: Some(vec![(
-                    String::from("bridges"),
-                    String::from("delete"),
-                    (String::from("uuid"), obj.get_uuid().unwrap()),
-                )]),
-                ..Default::default()
-            }));
+                self.params.push(Param::Op(Op {
+                    op: String::from("mutate"),
+                    table: String::from("Open_vSwitch"),
+                    r#where: Some(vec![]),
+                    mutations: Some(vec![(
+                        String::from("bridges"),
+                        String::from("delete"),
+                        (String::from("uuid"), obj.get_uuid().unwrap()),
+                    )]),
+                    ..Default::default()
+                }));
+            }
+            "Port" => {
+                self.params.push(Param::Op(Op {
+                    op: String::from("mutate"),
+                    table: String::from("Bridge"),
+                    r#where: Some(vec![OpCondition::Flat((
+                        String::from("name"),
+                        String::from("=="),
+                        String::from("virtus-int"),
+                    ))]),
+                    mutations: Some(vec![(
+                        String::from("ports"),
+                        String::from("delete"),
+                        (String::from("uuid"), obj.get_uuid().unwrap()),
+                    )]),
+                    ..Default::default()
+                }));
+
+                self.params.push(Param::Op(Op {
+                    op: String::from("delete"),
+                    table: String::from("Interface"),
+                    r#where: Some(vec![OpCondition::Flat((
+                        String::from("name"),
+                        String::from("=="),
+                        obj.get_name(),
+                    ))]),
+                    ..Default::default()
+                }));
+ 
+                self.params.push(Param::Op(Op {
+                    op: String::from("delete"),
+                    table: obj.get_table(),
+                    r#where: Some(vec![OpCondition::Nested((
+                        String::from("_uuid"),
+                        String::from("=="),
+                        (String::from("uuid"), obj.get_uuid().unwrap()),
+                    ))]),
+                    ..Default::default()
+                }));
+           }
+            _ => {
+                self.params.push(Param::Op(Op {
+                    op: String::from("delete"),
+                    table: obj.get_table(),
+                    r#where: Some(vec![OpCondition::Nested((
+                        String::from("_uuid"),
+                        String::from("=="),
+                        (String::from("uuid"), obj.get_uuid().unwrap()),
+                    ))]),
+                    ..Default::default()
+                }));
+            }
         }
 
         self
