@@ -1,0 +1,27 @@
+virtus_version: 1.0
+
+version: 
+name: 
+description:
+
+images:
+  ubuntu_18_cloud:
+    installer: True
+
+servers:
+  ub18:
+    image:
+    cpu_count: 2
+    mem_count: 2G
+    storage:
+    - type: 
+      size: 
+    networks:
+    - main:
+        ipv4_address: 192.168.0.1
+    pci_devices:
+      gpus: 1
+
+networks:
+- main
+
