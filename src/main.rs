@@ -36,12 +36,13 @@ fn main() {
     let network = virtus::vm::Network::new(Some(0), None, true, Some("10.20.30.0/24".into()))
         .expect("failed to create network");
 
-    let image = virtus::vm::Image::new(String::from("ubuntu-22.04.3-live-server-amd64.iso"), false);
+    let image = virtus::vm::Image::new(String::from("/home/james/Downloads/ubuntu-22.04.3-live-server-amd64.iso"), false);
 
     let disk = virtus::vm::Disk::create(10 * 1024 * 1024 * 1024).expect("failed to provision disk");
-    let domain = virtus::vm::VM::new(String::from("new vm"), 2, 4096, disk, image, network);
+    let mut domain = virtus::vm::VM::new(String::from("new vm"), 2, 4096, disk, image, network);
 
-    println!("{}", quick_xml::se::to_string(&domain).unwrap());
+    println!("{}", domain.to_xml().unwrap());
+    domain.build(&conn).unwrap();
 
     conn.close().unwrap();
 }

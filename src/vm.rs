@@ -1,6 +1,9 @@
+use quick_xml::writer::Writer;
 use serde::Serialize;
-use serde::ser::{SerializeMap, SerializeStruct};
+
+use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use std::error::Error;
+use std::io::Cursor;
 use std::process::Command;
 use uuid::Uuid;
 
@@ -42,24 +45,24 @@ impl Disk {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct Image {
     id: Uuid,
     installer: bool,
-    file: String,
+    filename: String,
 }
 
 impl Image {
-    pub fn new(file: String, installer: bool) -> Self {
+    pub fn new(filename: String, installer: bool) -> Self {
         Self {
             id: Uuid::new_v4(),
-            file,
+            filename,
             installer,
         }
     }
 
-    pub fn get_file(&self) -> String {
-        self.file.clone()
+    pub fn get_filename(&self) -> String {
+        self.filename.clone()
     }
 
     pub fn is_installer(&self) -> bool {
@@ -67,9 +70,10 @@ impl Image {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct Network {
     id: Uuid,
+    interface_id: String,
     vlan: i32,
     name: Option<String>,
     internal: bool,
@@ -86,22 +90,25 @@ impl Network {
         let id = Uuid::new_v4();
         let vlan_id = vlan.unwrap_or(0);
 
+        let interface_id = id.to_string()[..8].to_string();
+
         println!("{} {}", id, vlan_id);
         let output = Command::new("sh")
             .arg("-c")
             .arg(format!(
                 "ovs-vsctl add-port virtus-int {} tag={} -- set interface {} type=internal",
-                id, vlan_id, id
+                interface_id, vlan_id, interface_id
             ))
             .output()?;
 
         if output.status.success() {
             Ok(Self {
-                id: id,
+                id,
+                interface_id,
                 vlan: vlan_id,
-                name: name,
-                internal: internal,
-                cidr4: cidr4,
+                name,
+                internal,
+                cidr4,
             })
         } else {
             println!("{}", String::from_utf8(output.stderr).unwrap());
@@ -126,7 +133,7 @@ impl Network {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug)]
 pub enum State {
     NONE,
     RUNNING,
@@ -147,46 +154,15 @@ pub struct VM {
     state: State,
 }
 
-struct Memory(u64);
-
-impl Serialize for Memory {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer {
-
-        let mut memory = serializer.serialize_map(Some(2))?;
-        memory.serialize_entry("@unit", "MB")?;
-        memory.serialize_entry("$value", &self.0)?;
-        memory.end()
-    }
-}
-
-enum Device {
-    Disk(Disk),
-}
-
-impl Serialize for VM {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        // Does this number need to be accurate?
-        let mut domain = serializer.serialize_struct("domain", 1)?;
-
-        // @attr makes it a tag 
-        // $value makes it the content
-        domain.serialize_field("@type", "kvm")?;
-        domain.serialize_field("name", &self.name)?;
-        domain.serialize_field("uuid", &self.id.to_string())?;
-        domain.serialize_field("vcpu", &self.cpus)?;
-        domain.serialize_field("memory", &Memory(self.memory))?;
-
-        domain.end()
-    }
-}
-
 impl VM {
-    pub fn new(name: String, cpus: u8, memory: u64, disk: Disk, image: Image, network: Network) -> Self {
+    pub fn new(
+        name: String,
+        cpus: u8,
+        memory: u64,
+        disk: Disk,
+        image: Image,
+        network: Network,
+    ) -> Self {
         Self {
             id: Uuid::new_v4(),
             name,
@@ -200,19 +176,131 @@ impl VM {
         }
     }
 
-    pub fn to_xml(&self) -> Result<String, virt::error::Error> {
-        Ok(String::from("test"))
+    pub fn to_xml(&self) -> Result<String, VirtusError> {
+        let mut writer = Writer::new(Cursor::new(Vec::new()));
+
+        let mut domain = BytesStart::new("domain");
+        domain.push_attribute(("type", "kvm"));
+        writer.write_event(Event::Start(domain))?;
+
+        writer
+            .create_element("name")
+            .write_text_content(BytesText::new(&self.name.clone()))?;
+
+        writer
+            .create_element("uuid")
+            .write_text_content(BytesText::new(&self.id.to_string()))?;
+
+        writer
+            .create_element("memory")
+            .with_attribute(("unit", "MB"))
+            .write_text_content(BytesText::new(&self.memory.to_string()))?;
+
+        writer
+            .create_element("vcpu")
+            .write_text_content(BytesText::new(&self.cpus.to_string()))?;
+
+        writer
+            .create_element("os")
+            .write_inner_content::<_, VirtusError>(|writer| {
+                writer
+                    .create_element("type")
+                    .with_attributes([("arch", "x86_64"), ("machine", "q35")])
+                    .write_text_content(BytesText::new("hvm"))?;
+
+                writer
+                    .create_element("boot")
+                    .with_attribute(("dev", "hd"))
+                    .write_empty()?;
+
+                Ok(())
+            })?;
+
+        writer
+            .create_element("devices")
+            .write_inner_content::<_, VirtusError>(|writer| {
+                /*
+                                writer
+                                    .create_element("disk")
+                                    .with_attributes([("type", "file"), ("device", "disk")])
+                                    .write_inner_content::<_, VirtusError>(|writer| {
+                                        writer
+                                            .create_element("driver")
+                                            .with_attributes([("name", "qemu"), ("type", "qcow2")])
+                                            .write_empty()?;
+
+                                        writer
+                                            .create_element("source")
+                                            .with_attribute(("file", self.disk.filename.as_str()))
+                                            .write_empty()?;
+
+                                        writer
+                                            .create_element("target")
+                                            .with_attributes([("dev", "vda"), ("bus", "virtio")])
+                                            .write_empty()?;
+
+                                        Ok(())
+                                    })?;
+                */
+
+                writer
+                    .create_element("disk")
+                    .with_attributes([("type", "file"), ("device", "cdrom")])
+                    .write_inner_content::<_, VirtusError>(|writer| {
+                        writer
+                            .create_element("driver")
+                            .with_attributes([("name", "qemu"), ("type", "raw")])
+                            .write_empty()?;
+
+                        writer
+                            .create_element("source")
+                            .with_attribute(("file", self.image.filename.as_str()))
+                            .write_empty()?;
+
+                        writer
+                            .create_element("target")
+                            .with_attributes([("dev", "sda"), ("bus", "sata")])
+                            .write_empty()?;
+
+                        Ok(())
+                    })?;
+
+                writer
+                    .create_element("interface")
+                    .with_attribute(("type", "direct"))
+                    .write_inner_content::<_, VirtusError>(|writer| {
+                        writer
+                            .create_element("source")
+                            .with_attributes([
+                                ("dev", self.network.interface_id.to_string().as_str()),
+                                ("mode", "bridge"),
+                            ])
+                            .write_empty()?;
+
+                        writer
+                            .create_element("model")
+                            .with_attribute(("type", "virtio"))
+                            .write_empty()?;
+
+                        Ok(())
+                    })?;
+
+                Ok(())
+            })?;
+
+        writer.write_event(Event::End(BytesEnd::new("domain")))?;
+        let xml = writer.into_inner().into_inner();
+        Ok(String::from_utf8(xml).unwrap())
     }
 
-    pub fn build(
-        &self,
-        conn: &virt::connect::Connect,
-    ) -> Result<virt::domain::Domain, virt::error::Error> {
-        virt::domain::Domain::create_xml(
+    pub fn build(&mut self, conn: &virt::connect::Connect) -> Result<(), virt::error::Error> {
+        self.domain = Some(virt::domain::Domain::create_xml(
             conn,
             &self.to_xml().unwrap(),
             virt::sys::VIR_DOMAIN_RUNNING,
-        )
+        )?);
+
+        Ok(())
     }
 
     pub fn delete(self) -> Result<(), virt::error::Error> {
