@@ -1,9 +1,12 @@
 use serde::Serialize;
+use serde::ser::{SerializeMap, SerializeStruct};
 use std::error::Error;
 use std::process::Command;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize)]
+use crate::error::VirtusError;
+
+#[derive(Debug, Clone)]
 pub struct Disk {
     id: Uuid,
     filename: String,
@@ -11,9 +14,10 @@ pub struct Disk {
 }
 
 impl Disk {
-    pub fn create(size: usize) -> Result<Self, Box<dyn Error>> {
+    pub fn create(size: usize) -> Result<Self, VirtusError> {
         let id = Uuid::new_v4();
         //        let filename = format!("/var/lib/virtus/{}.qcow2", id);
+        // todo: /var/lib/virtus
         let filename = format!("/tmp/{}.qcow2", id);
 
         let output = Command::new("sh")
@@ -24,10 +28,10 @@ impl Disk {
         println!("{}", String::from_utf8(output.stdout).unwrap());
 
         if output.status.success() {
-            return Ok(Self { id, filename, size });
+            Ok(Self { id, filename, size })
         } else {
             println!("{}", String::from_utf8(output.stderr).unwrap());
-            return Err("failed to provision disk".into());
+            Err(VirtusError::DiskError)
         }
     }
 
@@ -43,6 +47,24 @@ pub struct Image {
     id: Uuid,
     installer: bool,
     file: String,
+}
+
+impl Image {
+    pub fn new(file: String, installer: bool) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            file,
+            installer,
+        }
+    }
+
+    pub fn get_file(&self) -> String {
+        self.file.clone()
+    }
+
+    pub fn is_installer(&self) -> bool {
+        self.installer
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -115,7 +137,9 @@ pub enum State {
 #[derive(Debug)]
 pub struct VM {
     id: Uuid,
-    cpus: i8,
+    name: String,
+    cpus: u8,
+    memory: u64,
     disk: Disk,
     image: Image,
     network: Network,
@@ -123,14 +147,54 @@ pub struct VM {
     state: State,
 }
 
+struct Memory(u64);
+
+impl Serialize for Memory {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+
+        let mut memory = serializer.serialize_map(Some(2))?;
+        memory.serialize_entry("@unit", "MB")?;
+        memory.serialize_entry("$value", &self.0)?;
+        memory.end()
+    }
+}
+
+enum Device {
+    Disk(Disk),
+}
+
+impl Serialize for VM {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Does this number need to be accurate?
+        let mut domain = serializer.serialize_struct("domain", 1)?;
+
+        // @attr makes it a tag 
+        // $value makes it the content
+        domain.serialize_field("@type", "kvm")?;
+        domain.serialize_field("name", &self.name)?;
+        domain.serialize_field("uuid", &self.id.to_string())?;
+        domain.serialize_field("vcpu", &self.cpus)?;
+        domain.serialize_field("memory", &Memory(self.memory))?;
+
+        domain.end()
+    }
+}
+
 impl VM {
-    pub fn new(cpus: i8, disk: Disk, image: Image, network: Network) -> Self {
+    pub fn new(name: String, cpus: u8, memory: u64, disk: Disk, image: Image, network: Network) -> Self {
         Self {
             id: Uuid::new_v4(),
-            cpus: cpus,
-            disk: disk,
-            image: image,
-            network: network,
+            name,
+            cpus,
+            memory,
+            disk,
+            image,
+            network,
             domain: None,
             state: State::NONE,
         }

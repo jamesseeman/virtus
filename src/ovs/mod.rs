@@ -82,7 +82,7 @@ impl Ovs {
     pub fn rpc_response(&mut self, request: Request) -> Result<Response, VirtusError> {
         // Convert the struct to json
         let msg = serde_json::to_vec(&request)?;
-        println!("{}", String::from_utf8_lossy(&msg));
+        //println!("{}", String::from_utf8_lossy(&msg));
 
         // Send the message to the socket
         self.stream.as_mut().unwrap().write_all(&msg)?;

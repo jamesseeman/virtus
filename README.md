@@ -6,6 +6,8 @@ The compute units in virtus are *servers* (synonymous with virtual machine), not
 
 ### To-do
 
+- replace String with &str where appropriate
+
 **OVS:**
 - replace Object trait w Record enum for OVS
 - parameterize interface/port bridge
