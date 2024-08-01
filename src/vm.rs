@@ -147,9 +147,9 @@ pub struct VM {
     name: String,
     cpus: u8,
     memory: u64,
-    disk: Disk,
-    image: Image,
-    network: Network,
+    disk: Option<Disk>,
+    image: Option<Image>,
+    network: Option<Network>,
     domain: Option<virt::domain::Domain>,
     state: State,
 }
@@ -168,9 +168,9 @@ impl VM {
             name,
             cpus,
             memory,
-            disk,
-            image,
-            network,
+            disk: Some(disk),
+            image: Some(image),
+            network: Some(network),
             domain: None,
             state: State::NONE,
         }
@@ -243,44 +243,93 @@ impl VM {
                                     })?;
                 */
 
+                // Installer CDROM
+                if let Some(image) = &self.image {
+                    writer
+                        .create_element("disk")
+                        .with_attributes([("type", "file"), ("device", "cdrom")])
+                        .write_inner_content::<_, VirtusError>(|writer| {
+                            writer
+                                .create_element("driver")
+                                .with_attributes([("name", "qemu"), ("type", "raw")])
+                                .write_empty()?;
+
+                            writer
+                                .create_element("source")
+                                .with_attribute(("file", image.filename.as_str()))
+                                .write_empty()?;
+
+                            writer
+                                .create_element("target")
+                                .with_attributes([("dev", "sda"), ("bus", "sata")])
+                                .write_empty()?;
+
+                            Ok(())
+                        })?;
+                }
+
+                // OVS NIC
+                if let Some(network) = &self.network {
+                    writer
+                        .create_element("interface")
+                        .with_attribute(("type", "direct"))
+                        .write_inner_content::<_, VirtusError>(|writer| {
+                            writer
+                                .create_element("source")
+                                .with_attributes([
+                                    ("dev", network.interface_id.to_string().as_str()),
+                                    ("mode", "bridge"),
+                                ])
+                                .write_empty()?;
+
+                            writer
+                                .create_element("model")
+                                .with_attribute(("type", "virtio"))
+                                .write_empty()?;
+
+                            Ok(())
+                        })?;
+                }
+
+                // Console
                 writer
-                    .create_element("disk")
-                    .with_attributes([("type", "file"), ("device", "cdrom")])
+                    .create_element("console")
+                    .with_attribute(("type", "pty"))
+                    .write_empty()?;
+
+                // Table (provides absolute cursor movement)
+                writer
+                    .create_element("input")
+                    .with_attributes([("type", "tablet"), ("bus", "usb")])
+                    .write_empty()?;
+
+                // Spice graphics device
+                writer
+                    .create_element("graphics")
+                    .with_attributes([
+                        ("type", "spice"),
+                        ("port", "-1"),
+                        ("tlsPort", "-1"),
+                        ("autoport", "yes"),
+                    ])
                     .write_inner_content::<_, VirtusError>(|writer| {
                         writer
-                            .create_element("driver")
-                            .with_attributes([("name", "qemu"), ("type", "raw")])
-                            .write_empty()?;
-
-                        writer
-                            .create_element("source")
-                            .with_attribute(("file", self.image.filename.as_str()))
-                            .write_empty()?;
-
-                        writer
-                            .create_element("target")
-                            .with_attributes([("dev", "sda"), ("bus", "sata")])
+                            .create_element("image")
+                            .with_attribute(("compression", "off"))
                             .write_empty()?;
 
                         Ok(())
                     })?;
 
+                // RNG
                 writer
-                    .create_element("interface")
-                    .with_attribute(("type", "direct"))
+                    .create_element("rng")
+                    .with_attribute(("model", "virtio"))
                     .write_inner_content::<_, VirtusError>(|writer| {
                         writer
-                            .create_element("source")
-                            .with_attributes([
-                                ("dev", self.network.interface_id.to_string().as_str()),
-                                ("mode", "bridge"),
-                            ])
-                            .write_empty()?;
-
-                        writer
-                            .create_element("model")
-                            .with_attribute(("type", "virtio"))
-                            .write_empty()?;
+                            .create_element("backend")
+                            .with_attribute(("model", "random"))
+                            .write_text_content(BytesText::new("/dev/urandom"))?;
 
                         Ok(())
                     })?;
@@ -297,8 +346,10 @@ impl VM {
         self.domain = Some(virt::domain::Domain::create_xml(
             conn,
             &self.to_xml().unwrap(),
-            virt::sys::VIR_DOMAIN_RUNNING,
+            virt::sys::VIR_DOMAIN_NONE,
         )?);
+
+        self.state = State::RUNNING;
 
         Ok(())
     }
@@ -308,5 +359,32 @@ impl VM {
             return d.destroy();
         }
         Ok(())
+    }
+
+    pub fn find(name: String, conn: &virt::connect::Connect) -> Result<Option<Self>, VirtusError> {
+        let domains = conn.list_all_domains(virt::sys::VIR_CONNECT_LIST_DOMAINS_ACTIVE)?;
+        let mut found: Vec<virt::domain::Domain> = domains
+            .into_iter()
+            .filter(|domain| domain.get_name().unwrap() == name)
+            .collect();
+
+        match found.len() {
+            0 => Ok(None),
+            _ => {
+                let domain = found.remove(0);
+
+                Ok(Some(Self {
+                    id: Uuid::parse_str(domain.get_uuid_string().unwrap().as_str())?,
+                    name: domain.get_name()?,
+                    cpus: domain.get_max_vcpus()?.try_into().unwrap(),
+                    memory: domain.get_max_memory().unwrap() / 1024,
+                    disk: None,
+                    image: None,
+                    network: None,
+                    domain: Some(domain),
+                    state: State::RUNNING,
+                }))
+            }
+        }
     }
 }

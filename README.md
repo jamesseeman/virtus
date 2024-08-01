@@ -6,7 +6,9 @@ The compute units in virtus are *servers* (synonymous with virtual machine), not
 
 ### To-do
 
+- overhaul errors w anyhow & thiserror
 - replace String with &str where appropriate
+- check if vm name exists
 
 **OVS:**
 - replace Object trait w Record enum for OVS

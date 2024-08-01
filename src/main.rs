@@ -33,6 +33,14 @@ fn main() {
     let mut conn =
         virt::connect::Connect::open(uri).expect(format!("Failed to connect to {}", uri).as_str());
 
+    let new_vm = virtus::vm::VM::find(String::from("new vm"), &conn);
+    println!("{:?}", new_vm);
+
+    if let Ok(Some(vm)) = new_vm {
+        vm.delete().unwrap();
+    }
+
+    /*
     let network = virtus::vm::Network::new(Some(0), None, true, Some("10.20.30.0/24".into()))
         .expect("failed to create network");
 
@@ -43,6 +51,7 @@ fn main() {
 
     println!("{}", domain.to_xml().unwrap());
     domain.build(&conn).unwrap();
+    */
 
     conn.close().unwrap();
 }
