@@ -52,7 +52,7 @@ fn main() -> Result<()> {
      *
      */
 
-    let mut conn = virtus::connect(Config::new())?;
+    let mut conn = virtus::connect(&Config::new())?;
 
     if let Ok(Some(vm)) = VM::find("new_vm", &conn) {
         println!("{:?}", vm);
