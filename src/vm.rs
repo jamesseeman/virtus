@@ -155,7 +155,7 @@ pub struct VM {
 
 impl VM {
     pub fn new(
-        name: String,
+        name: &str,
         cpus: u8,
         memory: u64,
         disk: Disk,
@@ -164,7 +164,7 @@ impl VM {
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
-            name,
+            name: String::from(name),
             cpus,
             memory,
             disk: Some(disk),
