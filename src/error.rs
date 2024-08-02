@@ -1,8 +1,9 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-#[error("Error occured")]
+#[error("error occured")]
 pub enum VirtusError {
+    #[error("failed to create disk")]
     DiskError,
     UuidError(#[from] uuid::Error),
     XMLError(#[from] quick_xml::Error),
@@ -10,5 +11,6 @@ pub enum VirtusError {
     UTF8Error(#[from] std::str::Utf8Error),
     SerdeError(#[from] serde_json::Error),
     VirtError(#[from] virt::error::Error),
-    DbError
+    SledError(#[from] sled::Error),
+    DbError,
 }

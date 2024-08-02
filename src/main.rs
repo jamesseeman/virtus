@@ -1,3 +1,6 @@
+use anyhow::Result;
+use virtus::{config::Config, vm::*};
+
 #[cfg(test)]
 mod tests {
     const URI: &str = "qemu:///system";
@@ -27,31 +30,49 @@ mod tests {
     }
 }
 
-fn main() {
-    let uri = "qemu:///system";
+fn main() -> Result<()> {
+    /*
+     *
+     * let conn = virtus::connect();
+     * let config = virtus::Config::new();
+     * let app = virtus::App::new(); // probably not this?
+     *
+     * let vm = virtus::VM::new(..., &conn);
+     * let vm = virtus::VM::new(..., &conn, &config);
+     * let vm = virtus::VM::new(..., &config);
+     * let domain
+     *
+     *
+     * let config = virtus::Config::new();
+     * let conn = virtus::connect(&config);
+     * or of course...
+     * let conn = virtus::connect(virtus::Config::new());
+     *
+     * then
+     *
+     */
 
-    let mut conn =
-        virt::connect::Connect::open(uri).expect(format!("Failed to connect to {}", uri).as_str());
+    let mut conn = virtus::connect(Config::new())?;
 
-    let new_vm = virtus::vm::VM::find(String::from("new vm"), &conn);
-    println!("{:?}", new_vm);
-
-    if let Ok(Some(vm)) = new_vm {
-        vm.delete().unwrap();
+    if let Ok(Some(vm)) = VM::find("new_vm", &conn) {
+        println!("{:?}", vm);
+        vm.delete()?;
     }
 
-    /*
     let network = virtus::vm::Network::new(Some(0), None, true, Some("10.20.30.0/24".into()))
         .expect("failed to create network");
 
-    let image = virtus::vm::Image::new(String::from("/home/james/Downloads/ubuntu-22.04.3-live-server-amd64.iso"), false);
+    let image = virtus::vm::Image::new(
+        String::from("/home/james/Downloads/ubuntu-22.04.3-live-server-amd64.iso"),
+        false,
+    );
 
     let disk = virtus::vm::Disk::create(10 * 1024 * 1024 * 1024).expect("failed to provision disk");
     let mut domain = virtus::vm::VM::new(String::from("new vm"), 2, 4096, disk, image, network);
 
     println!("{}", domain.to_xml().unwrap());
-    domain.build(&conn).unwrap();
-    */
+    domain.build(&conn)?;
 
-    conn.close().unwrap();
+    conn.close()?;
+    Ok(())
 }

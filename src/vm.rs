@@ -7,7 +7,8 @@ use std::io::Cursor;
 use std::process::Command;
 use uuid::Uuid;
 
-use crate::error::VirtusError;
+use crate::VirtusError;
+use anyhow::Result;
 
 #[derive(Debug, Clone)]
 pub struct Disk {
@@ -17,10 +18,8 @@ pub struct Disk {
 }
 
 impl Disk {
-    pub fn create(size: usize) -> Result<Self, VirtusError> {
+    pub fn create(size: usize) -> Result<Self> {
         let id = Uuid::new_v4();
-        //        let filename = format!("/var/lib/virtus/{}.qcow2", id);
-        // todo: /var/lib/virtus
         let filename = format!("/tmp/{}.qcow2", id);
 
         let output = Command::new("sh")
@@ -34,11 +33,11 @@ impl Disk {
             Ok(Self { id, filename, size })
         } else {
             println!("{}", String::from_utf8(output.stderr).unwrap());
-            Err(VirtusError::DiskError)
+            Err(VirtusError::DiskError.into())
         }
     }
 
-    pub fn delete(self) -> Result<String, std::io::Error> {
+    pub fn delete(self) -> Result<String> {
         std::fs::remove_file(&self.filename)?;
 
         Ok(self.filename.clone())
@@ -135,7 +134,7 @@ impl Network {
 
 #[derive(Debug)]
 pub enum State {
-    NONE,
+    UNDEFINED,
     RUNNING,
     STOPPED,
     PAUSED,
@@ -172,11 +171,11 @@ impl VM {
             image: Some(image),
             network: Some(network),
             domain: None,
-            state: State::NONE,
+            state: State::UNDEFINED,
         }
     }
 
-    pub fn to_xml(&self) -> Result<String, VirtusError> {
+    pub fn to_xml(&self) -> Result<String> {
         let mut writer = Writer::new(Cursor::new(Vec::new()));
 
         let mut domain = BytesStart::new("domain");
@@ -342,9 +341,9 @@ impl VM {
         Ok(String::from_utf8(xml).unwrap())
     }
 
-    pub fn build(&mut self, conn: &virt::connect::Connect) -> Result<(), virt::error::Error> {
+    pub fn build(&mut self, conn: &crate::Connection) -> Result<()> {
         self.domain = Some(virt::domain::Domain::create_xml(
-            conn,
+            &conn.virt,
             &self.to_xml().unwrap(),
             virt::sys::VIR_DOMAIN_NONE,
         )?);
@@ -354,15 +353,16 @@ impl VM {
         Ok(())
     }
 
-    pub fn delete(self) -> Result<(), virt::error::Error> {
+    pub fn delete(self) -> Result<()> {
         if let Some(d) = self.domain {
-            return d.destroy();
+            d.destroy()?
         }
+
         Ok(())
     }
 
-    pub fn find(name: String, conn: &virt::connect::Connect) -> Result<Option<Self>, VirtusError> {
-        let domains = conn.list_all_domains(virt::sys::VIR_CONNECT_LIST_DOMAINS_ACTIVE)?;
+    pub fn find(name: &str, conn: &crate::Connection) -> Result<Option<Self>, VirtusError> {
+        let domains = conn.virt.list_all_domains(virt::sys::VIR_CONNECT_LIST_DOMAINS_ACTIVE)?;
         let mut found: Vec<virt::domain::Domain> = domains
             .into_iter()
             .filter(|domain| domain.get_name().unwrap() == name)

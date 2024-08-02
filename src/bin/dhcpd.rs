@@ -1,0 +1,47 @@
+use tokio::net::UdpSocket;
+use virtus::error::VirtusError;
+//use bytes::{Buf, BufMut, BytesMut};
+use std::collections::HashMap;
+use std::net::Ipv4Addr;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use pnet::datalink;
+use dhcproto::v4::{self, Decodable};
+use virtus::config::Config;
+use std::fs;
+use std::path::Path;
+use anyhow::Result;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+//    let config = Config::new()?;
+//    let vm_tree = config.db.open_tree("vms")?;
+//    vm_tree.insert("hm", ":(");
+    
+
+    //let interfaces = datalink::interfaces();
+    //let iface: Vec<datalink::NetworkInterface> = interfaces.into_iter().filter(|iface| iface.name == String::from("virtus-int")).collect();
+    //println!("{:?}", iface);
+
+    let socket = UdpSocket::bind("0.0.0.0:67").await?;
+    //socket.bind_device(Some(b"virtus-int"))?;
+
+    let mut buf = [0; 1024];
+    loop {
+        let (len, addr) = socket.recv_from(&mut buf).await?;
+        println!("{}, {}", len, addr);
+
+
+        let msg = v4::Message::decode(&mut v4::Decoder::new(&buf)).unwrap();
+        println!("{:?}, {:?}", msg, msg.chaddr());
+
+        let opts = msg.opts().get(v4::OptionCode::MessageType);
+        println!("{:?}", opts);
+
+        
+//        let response = v4::Message::default();
+//        response.set_flags(dhcproto::v4::Flags::
+    }
+
+    Ok(())
+}
