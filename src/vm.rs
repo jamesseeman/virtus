@@ -45,7 +45,8 @@ impl Disk {
     }
 
     pub fn delete(self, conn: &Connection) -> Result<String> {
-        // Todo: check if a VM is using disk
+        // todo: check if a VM is using disk
+        // todo: handle when file has already been deleted
         std::fs::remove_file(&self.filename)?;
         conn.db.open_tree("disks")?.remove(self.id)?;
         Ok(self.filename.clone())
@@ -396,8 +397,9 @@ impl VM {
                             writer
                                 .create_element("source")
                                 .with_attributes([
-                                    ("dev", interface.link_name.as_str()),
-                                    ("mode", "bridge"),
+                                    //                                    ("dev", interface.link_name.as_str()),
+                                    ("dev", "vlan.20"),
+                                    ("mode", "passthrough"),
                                 ])
                                 .write_empty()?;
 
@@ -405,6 +407,19 @@ impl VM {
                                 .create_element("model")
                                 .with_attribute(("type", "virtio"))
                                 .write_empty()?;
+
+                            /*
+                            writer
+                                .create_element("vlan")
+                                .write_inner_content::<_, VirtusError>(|writer| {
+                                    writer
+                                        .create_element("tag")
+                                        .with_attribute(("id", "20"))
+                                        .write_empty()?;
+
+                                    Ok(())
+                                })?;
+                            */
 
                             Ok(())
                         })?;
@@ -521,6 +536,12 @@ impl VM {
             }
             State::STOPPED => self.domain.unwrap().undefine()?,
             State::UNDEFINED => {}
+        }
+
+        for disk_id in self.disks {
+            if let Some(disk) = Disk::get(&disk_id, &conn)? {
+                disk.delete(&conn)?;
+            }
         }
 
         conn.db.open_tree("virtual_machines")?.remove(self.id)?;
