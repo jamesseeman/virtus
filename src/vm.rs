@@ -11,6 +11,8 @@ use uuid::Uuid;
 use crate::{Connection, VirtusError};
 use anyhow::Result;
 
+//use virt_sys::
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Disk {
     id: Uuid,
@@ -20,7 +22,7 @@ pub struct Disk {
 
 impl Disk {
     pub fn new(size: u64, conn: &Connection) -> Result<Self> {
-        let disk_dir = format!("{}/disks/", &conn.data_dir);
+        let disk_dir = format!("{}/disks", &conn.data_dir);
         if !Path::exists(Path::new(&disk_dir)) {
             fs::create_dir(&disk_dir)?;
         }
@@ -30,7 +32,7 @@ impl Disk {
 
         let output = Command::new("sh")
             .arg("-c")
-            .arg(format!("qemu-img create {} {}", filename, size))
+            .arg(format!("qemu-img create -f qcow2 {} {}", filename, size))
             .output()?;
 
         println!("{}", String::from_utf8(output.stdout).unwrap());
@@ -91,7 +93,7 @@ impl Image {
 
     pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Self>> {
         match conn.db.open_tree("images")?.get(id)? {
-            Some(image) => Ok(bincode::deserialize(&image)?),
+            Some(image) => Ok(Some(bincode::deserialize(&image)?)),
             None => Ok(None),
         }
     }
@@ -148,7 +150,7 @@ impl Network {
 
     pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Self>> {
         match conn.db.open_tree("networks")?.get(id)? {
-            Some(network) => Ok(bincode::deserialize(&network)?),
+            Some(network) => Ok(Some(bincode::deserialize(&network)?)),
             None => Ok(None),
         }
     }
@@ -194,7 +196,7 @@ impl Interface {
 
     pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Interface>> {
         match conn.db.open_tree("interfaces")?.get(id)? {
-            Some(interface) => Ok(bincode::deserialize(&interface)?),
+            Some(interface) => Ok(Some(bincode::deserialize(&interface)?)),
             None => Ok(None),
         }
     }
@@ -233,6 +235,10 @@ impl VM {
         network: &mut Network,
         conn: &Connection,
     ) -> Result<Self> {
+        if let Some(_) = VM::find(name, conn)? {
+            return Err(VirtusError::VMExists.into());
+        }
+
         let disk = Disk::new(size, conn)?;
         let interface = Interface::new(network, conn)?;
         let vm = Self {
@@ -462,7 +468,7 @@ impl VM {
     pub fn build(&mut self, conn: &Connection) -> Result<()> {
         self.domain = Some(virt::domain::Domain::create_xml(
             &conn.virt,
-            &self.to_xml(conn).unwrap(),
+            &self.to_xml(conn)?,
             virt::sys::VIR_DOMAIN_NONE,
         )?);
 
@@ -481,21 +487,33 @@ impl VM {
 
     pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Self>> {
         match conn.db.open_tree("virtual_machines")?.get(id)? {
-            Some(vm) => {
-                let mut deserialized_vm: VM = bincode::deserialize(&vm)?;
-                let mut found: Vec<virt::domain::Domain> = conn
+            Some(found) => {
+                let mut vm: VM = bincode::deserialize(&found)?;
+                let mut vm_buf: Vec<virt::domain::Domain> = conn
                     .virt
-                    .list_all_domains(virt::sys::VIR_CONNECT_LIST_DOMAINS_ACTIVE)?
+                    .list_all_domains(
+                        virt::sys::VIR_CONNECT_LIST_DOMAINS_ACTIVE
+                            | virt::sys::VIR_CONNECT_LIST_DOMAINS_INACTIVE,
+                    )?
                     .into_iter()
                     .filter(|domain| {
-                        domain.get_uuid_string().unwrap() == deserialized_vm.id.to_string()
+                        println!(
+                            "{} =? {}",
+                            domain.get_uuid_string().unwrap(),
+                            vm.id.to_string()
+                        );
+                        domain.get_uuid_string().unwrap() == vm.id.to_string()
                     })
                     .collect();
 
-                match found.pop() {
+                match vm_buf.pop() {
                     Some(domain) => {
-                        deserialized_vm.domain = Some(domain);
-                        Ok(Some(deserialized_vm))
+                        vm.state = match domain.get_state()? {
+
+                            _ => State::UNDEFINED
+                        };
+                        vm.domain = Some(domain);
+                        Ok(Some(vm))
                     }
                     None => Ok(None),
                 }
@@ -505,11 +523,13 @@ impl VM {
     }
 
     pub fn find(name: &str, conn: &Connection) -> Result<Option<Self>> {
+        // Todo: store vm name somewhere so we don't need to load each vm into memory
+        // Probably should store (id, name) as key
         for result in conn.db.open_tree("virtual_machines")?.into_iter() {
-            let (_, vm) = result?;
-            let deserialized_vm: VM = bincode::deserialize(&vm)?;
-            if deserialized_vm.name == name {
-                return VM::get(&deserialized_vm.id, conn);
+            let (_, found) = result?;
+            let vm: VM = bincode::deserialize(&found)?;
+            if vm.name == name {
+                return VM::get(&vm.id, conn);
             }
         }
 

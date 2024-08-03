@@ -15,4 +15,6 @@ pub enum VirtusError {
     VirtError(#[from] virt::error::Error),
     SledError(#[from] sled::Error),
     DbError,
+    #[error("VM of that name already exists")]
+    VMExists
 }

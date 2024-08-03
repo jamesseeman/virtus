@@ -56,7 +56,7 @@ fn main() -> Result<()> {
 
     let mut conn = virtus::connect(&Config::new())?;
 
-    if let Ok(Some(vm)) = VM::find("new_vm", &conn) {
+    if let Ok(Some(vm)) = VM::find("new vm", &conn) {
         println!("{:?}", vm);
         vm.delete()?;
     }
@@ -66,7 +66,7 @@ fn main() -> Result<()> {
 
     let image = Image::new(
         String::from("/home/james/Downloads/ubuntu-22.04.3-live-server-amd64.iso"),
-        false,
+        true,
         &conn,
     )?;
 
