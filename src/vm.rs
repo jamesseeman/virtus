@@ -44,6 +44,19 @@ impl Disk {
         }
     }
 
+    pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
+        // todo: check if a VM is using disk
+        // todo: handle when file has already been deleted
+        let tree = conn.db.open_tree("disks")?;
+        if let Some(found) = tree.get(id)? {
+            let disk: Disk = bincode::deserialize(&found)?;
+            std::fs::remove_file(disk.filename)?;
+        }
+
+        tree.remove(id)?;
+        Ok(())
+    }
+
     pub fn delete(self, conn: &Connection) -> Result<String> {
         // todo: check if a VM is using disk
         // todo: handle when file has already been deleted
@@ -57,6 +70,18 @@ impl Disk {
             Some(disk) => Ok(Some(bincode::deserialize(&disk)?)),
             None => Ok(None),
         }
+    }
+
+    pub fn list(conn: &Connection) -> Result<Vec<Uuid>> {
+        let disks: Vec<Uuid> = conn
+            .db
+            .open_tree("disks")?
+            .into_iter()
+            .filter_map(|result| result.ok())
+            .filter_map(|option| Uuid::from_slice(&option.0).ok())
+            .collect();
+
+        Ok(disks)
     }
 }
 
@@ -95,7 +120,27 @@ impl Image {
         }
     }
 
-    //todo delete
+    pub fn list(conn: &Connection) -> Result<Vec<Uuid>> {
+        let images: Vec<Uuid> = conn
+            .db
+            .open_tree("images")?
+            .into_iter()
+            .filter_map(|result| result.ok())
+            .filter_map(|option| Uuid::from_slice(&option.0).ok())
+            .collect();
+
+        Ok(images)
+    }
+
+    pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
+        conn.db.open_tree("images")?.remove(id)?;
+        Ok(())
+    }
+
+    pub fn delete(self, conn: &Connection) -> Result<()> {
+        conn.db.open_tree("images")?.remove(self.id)?;
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -143,13 +188,44 @@ impl Network {
         todo!();
     }
 
-    // todo: delete
-
     pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Self>> {
         match conn.db.open_tree("networks")?.get(id)? {
             Some(network) => Ok(Some(bincode::deserialize(&network)?)),
             None => Ok(None),
         }
+    }
+
+    pub fn list(conn: &Connection) -> Result<Vec<Uuid>> {
+        let networks: Vec<Uuid> = conn
+            .db
+            .open_tree("networks")?
+            .into_iter()
+            .filter_map(|result| result.ok())
+            .filter_map(|option| Uuid::from_slice(&option.0).ok())
+            .collect();
+
+        Ok(networks)
+    }
+
+    pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
+        // todo: handle when network doesn't exist
+        if let Some(network) = Network::get(&id, &conn)? {
+            for interface in network.interfaces {
+                Interface::delete_by_id(interface, &conn)?;
+            }
+
+            conn.db.open_tree("networks")?.remove(id)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn delete(self, conn: &Connection) -> Result<()> {
+        for interface in self.interfaces {
+            Interface::delete_by_id(interface, &conn)?;
+        }
+        conn.db.open_tree("networks")?.remove(self.id)?;
+        Ok(())
     }
 }
 
@@ -162,6 +238,7 @@ pub struct Interface {
 }
 
 impl Interface {
+    // todo: persist interface <-> network vector to kv store
     pub fn new(network: &mut Network, conn: &Connection) -> Result<Self> {
         let id = Uuid::new_v4();
         let link_name = id.to_string()[..8].to_string();
@@ -196,6 +273,30 @@ impl Interface {
             Some(interface) => Ok(Some(bincode::deserialize(&interface)?)),
             None => Ok(None),
         }
+    }
+
+    pub fn list(conn: &Connection) -> Result<Vec<Uuid>> {
+        let interfaces: Vec<Uuid> = conn
+            .db
+            .open_tree("interfaces")?
+            .into_iter()
+            .filter_map(|result| result.ok())
+            .filter_map(|option| Uuid::from_slice(&option.0).ok())
+            .collect();
+
+        Ok(interfaces)
+    }
+
+    pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
+        // todo: update parent network interfaces
+        conn.db.open_tree("interfaces")?.remove(id)?;
+        Ok(())
+    }
+
+    pub fn delete(self, conn: &Connection) -> Result<()> {
+        // todo: update parent network interfaces
+        conn.db.open_tree("interfaces")?.remove(self.id)?;
+        Ok(())
     }
 }
 
@@ -525,6 +626,34 @@ impl VM {
         }
     }
 
+    pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
+        if let Some(vm) = VM::get(&id, &conn)? {
+            match vm.get_state()? {
+                // self.domain.unwrap() should be fine, since get_state()
+                // returned successfully with State
+                State::RUNNING | State::SHUTTING_DOWN | State::PAUSED => {
+                    let domain = vm.domain.unwrap();
+                    domain.destroy()?;
+                    domain.undefine()?;
+                }
+                State::STOPPED => vm.domain.unwrap().undefine()?,
+                State::UNDEFINED => {}
+            }
+
+            for disk in vm.disks {
+                Disk::delete_by_id(disk, &conn)?;
+            }
+
+            for interface in vm.interfaces {
+                Interface::delete_by_id(interface, &conn)?;
+            }
+
+            conn.db.open_tree("virtual_machines")?.remove(id)?;
+        }
+
+        Ok(())
+    }
+
     pub fn delete(self, conn: &Connection) -> Result<()> {
         match self.get_state()? {
             // self.domain.unwrap() should be fine, since get_state()
@@ -538,10 +667,12 @@ impl VM {
             State::UNDEFINED => {}
         }
 
-        for disk_id in self.disks {
-            if let Some(disk) = Disk::get(&disk_id, &conn)? {
-                disk.delete(&conn)?;
-            }
+        for disk in self.disks {
+            Disk::delete_by_id(disk, &conn)?;
+        }
+
+        for interface in self.interfaces {
+            Interface::delete_by_id(interface, &conn)?;
         }
 
         conn.db.open_tree("virtual_machines")?.remove(self.id)?;
@@ -581,5 +712,17 @@ impl VM {
         }
 
         Ok(None)
+    }
+
+    pub fn list(conn: &Connection) -> Result<Vec<Uuid>> {
+        let vms: Vec<Uuid> = conn
+            .db
+            .open_tree("virtual_machines")?
+            .into_iter()
+            .filter_map(|result| result.ok())
+            .filter_map(|option| Uuid::from_slice(&option.0).ok())
+            .collect();
+
+        Ok(vms)
     }
 }

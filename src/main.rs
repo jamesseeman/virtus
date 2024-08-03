@@ -60,7 +60,33 @@ fn main() -> Result<()> {
         println!("{:?}", vm);
         vm.delete(&conn)?;
     }
+    
+    println!("Disks: {:?}", Disk::list(&conn)?);
+    println!("Images: {:?}", Image::list(&conn)?);
+    println!("Networks: {:?}", Network::list(&conn)?);
+    println!("Interfaces: {:?}", Interface::list(&conn)?);
+    println!("VMs: {:?}", VM::list(&conn)?);
+    
+    for disk in Disk::list(&conn)? {
+        Disk::delete_by_id(disk, &conn)?;
+    }
 
+    for image in Image::list(&conn)? {
+        Image::delete_by_id(image, &conn)?;
+    }
+
+    for network in Network::list(&conn)? {
+        Network::delete_by_id(network, &conn)?;
+    }
+
+    for interface in Interface::list(&conn)? {
+        Interface::delete_by_id(interface, &conn)?;
+    }
+
+    for vm in VM::list(&conn)? {
+        VM::delete_by_id(vm, &conn)?;
+    }
+    /*
     let mut network = Network::new(None, Some(0), Some("10.20.30.0/24".into()), &conn)
         .expect("failed to create network");
 
@@ -82,6 +108,7 @@ fn main() -> Result<()> {
 
     println!("{}", domain.to_xml(&conn).unwrap());
     domain.build(&conn)?;
+    */
 
     conn.close()?;
     Ok(())
