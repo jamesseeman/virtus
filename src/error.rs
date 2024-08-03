@@ -16,5 +16,9 @@ pub enum VirtusError {
     SledError(#[from] sled::Error),
     DbError,
     #[error("VM of that name already exists")]
-    VMExists
+    VMExists,
+    #[error("VM has not been defined")]
+    VMUndefined,
+    #[error("VM is being shut down")]
+    VMShuttingDown,
 }

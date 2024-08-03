@@ -11,8 +11,6 @@ use uuid::Uuid;
 use crate::{Connection, VirtusError};
 use anyhow::Result;
 
-//use virt_sys::
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Disk {
     id: Uuid,
@@ -34,8 +32,6 @@ impl Disk {
             .arg("-c")
             .arg(format!("qemu-img create -f qcow2 {} {}", filename, size))
             .output()?;
-
-        println!("{}", String::from_utf8(output.stdout).unwrap());
 
         if output.status.success() {
             let disk = Self { id, filename, size };
@@ -206,6 +202,7 @@ impl Interface {
 pub enum State {
     UNDEFINED,
     RUNNING,
+    SHUTTING_DOWN,
     STOPPED,
     PAUSED,
 }
@@ -221,7 +218,6 @@ pub struct VM {
     interfaces: Vec<Uuid>,
     #[serde(skip)]
     domain: Option<virt::domain::Domain>,
-    state: State,
 }
 
 impl VM {
@@ -250,7 +246,6 @@ impl VM {
             image: image.id,
             interfaces: vec![interface.id],
             domain: None,
-            state: State::UNDEFINED,
         };
         conn.db
             .open_tree("virtual_machines")?
@@ -309,7 +304,6 @@ impl VM {
 
         // <os>
         //  <type arch=x86_64 machine=q35>hvm</type>
-        //  <boot dev=hd />
         // </os>
         writer
             .create_element("os")
@@ -319,10 +313,12 @@ impl VM {
                     .with_attributes([("arch", "x86_64"), ("machine", "q35")])
                     .write_text_content(BytesText::new("hvm"))?;
 
+                /*
                 writer
                     .create_element("boot")
                     .with_attribute(("dev", "hd"))
                     .write_empty()?;
+                */
 
                 Ok(())
             })?;
@@ -379,6 +375,11 @@ impl VM {
                             writer
                                 .create_element("target")
                                 .with_attributes([("dev", "sda"), ("bus", "sata")])
+                                .write_empty()?;
+
+                            writer
+                                .create_element("boot")
+                                .with_attribute(("order", "1"))
                                 .write_empty()?;
 
                             Ok(())
@@ -466,22 +467,63 @@ impl VM {
     }
 
     pub fn build(&mut self, conn: &Connection) -> Result<()> {
-        self.domain = Some(virt::domain::Domain::create_xml(
-            &conn.virt,
-            &self.to_xml(conn)?,
-            virt::sys::VIR_DOMAIN_NONE,
-        )?);
-
-        self.state = State::RUNNING;
-
+        let domain = virt::domain::Domain::define_xml(&conn.virt, &self.to_xml(conn)?)?;
+        domain.create()?;
+        self.domain = Some(domain);
         Ok(())
     }
 
-    pub fn delete(self) -> Result<()> {
-        if let Some(d) = self.domain {
-            d.destroy()?
+    pub fn start(&self) -> Result<()> {
+        match self.get_state()? {
+            State::STOPPED => {
+                self.domain.as_ref().unwrap().create()?;
+                Ok(())
+            }
+            State::PAUSED => {
+                self.domain.as_ref().unwrap().resume()?;
+                Ok(())
+            }
+            State::SHUTTING_DOWN => return Err(VirtusError::VMShuttingDown.into()),
+            State::UNDEFINED => return Err(VirtusError::VMUndefined.into()),
+            State::RUNNING => Ok(()),
+        }
+    }
+
+    pub fn get_state(&self) -> Result<State> {
+        match &self.domain {
+            Some(domain) => {
+                match domain.get_state()?.0 {
+                    // todo: more granular state mgmt
+                    virt::sys::VIR_DOMAIN_RUNNING => Ok(State::RUNNING),
+                    virt::sys::VIR_DOMAIN_PAUSED
+                    | virt::sys::VIR_DOMAIN_BLOCKED
+                    | virt::sys::VIR_DOMAIN_PMSUSPENDED => Ok(State::PAUSED),
+                    virt::sys::VIR_DOMAIN_SHUTDOWN => Ok(State::SHUTTING_DOWN),
+                    // thank you formatter >:(
+                    virt::sys::VIR_DOMAIN_SHUTOFF | virt::sys::VIR_DOMAIN_CRASHED => {
+                        Ok(State::STOPPED)
+                    }
+                    _ => Ok(State::UNDEFINED),
+                }
+            }
+            None => Ok(State::UNDEFINED),
+        }
+    }
+
+    pub fn delete(self, conn: &Connection) -> Result<()> {
+        match self.get_state()? {
+            // self.domain.unwrap() should be fine, since get_state()
+            // returned successfully with State
+            State::RUNNING | State::SHUTTING_DOWN | State::PAUSED => {
+                let domain = self.domain.unwrap();
+                domain.destroy()?;
+                domain.undefine()?;
+            }
+            State::STOPPED => self.domain.unwrap().undefine()?,
+            State::UNDEFINED => {}
         }
 
+        conn.db.open_tree("virtual_machines")?.remove(self.id)?;
         Ok(())
     }
 
@@ -496,27 +538,11 @@ impl VM {
                             | virt::sys::VIR_CONNECT_LIST_DOMAINS_INACTIVE,
                     )?
                     .into_iter()
-                    .filter(|domain| {
-                        println!(
-                            "{} =? {}",
-                            domain.get_uuid_string().unwrap(),
-                            vm.id.to_string()
-                        );
-                        domain.get_uuid_string().unwrap() == vm.id.to_string()
-                    })
+                    .filter(|domain| domain.get_uuid_string().unwrap() == vm.id.to_string())
                     .collect();
 
-                match vm_buf.pop() {
-                    Some(domain) => {
-                        vm.state = match domain.get_state()? {
-
-                            _ => State::UNDEFINED
-                        };
-                        vm.domain = Some(domain);
-                        Ok(Some(vm))
-                    }
-                    None => Ok(None),
-                }
+                vm.domain = vm_buf.pop();
+                Ok(Some(vm))
             }
             None => Ok(None),
         }

@@ -58,7 +58,7 @@ fn main() -> Result<()> {
 
     if let Ok(Some(vm)) = VM::find("new vm", &conn) {
         println!("{:?}", vm);
-        vm.delete()?;
+        vm.delete(&conn)?;
     }
 
     let mut network = Network::new(None, Some(0), Some("10.20.30.0/24".into()), &conn)

@@ -7,7 +7,7 @@ keywords = ["libvirt", "virtualization", "KVM"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-virt = { version = "=0.3.1", features = ["qemu", "bindgen_regenerate"] }
+virt = { version = "=0.3.1", features = ["qemu"] }
 #virt = { version = "0.4.0", features = ["qemu", "bindgen_regenerate"] }
 #virt = { version = "0.4.0", features = ["qemu"] } 
 sled = "0.34.7"
@@ -24,7 +24,7 @@ dhcproto = "0.12.0"
 bincode = "1.3.3"
 
 #[dev-dependencies]
-virt-sys = "0.2.0"
+#virt-sys = "0.2.0"
 
 
 [dependencies.uuid]
