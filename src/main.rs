@@ -33,27 +33,6 @@ mod tests {
 }
 
 fn main() -> Result<()> {
-    /*
-     *
-     * let conn = virtus::connect();
-     * let config = virtus::Config::new();
-     * let app = virtus::App::new(); // probably not this?
-     *
-     * let vm = virtus::VM::new(..., &conn);
-     * let vm = virtus::VM::new(..., &conn, &config);
-     * let vm = virtus::VM::new(..., &config);
-     * let domain
-     *
-     *
-     * let config = virtus::Config::new();
-     * let conn = virtus::connect(&config);
-     * or of course...
-     * let conn = virtus::connect(virtus::Config::new());
-     *
-     * then
-     *
-     */
-
     let mut conn = virtus::connect(&Config::new())?;
 
     if let Ok(Some(vm)) = VM::find("new vm", &conn) {
@@ -61,6 +40,7 @@ fn main() -> Result<()> {
         vm.delete(&conn)?;
     }
     
+    /*
     println!("Disks: {:?}", Disk::list(&conn)?);
     println!("Images: {:?}", Image::list(&conn)?);
     println!("Networks: {:?}", Network::list(&conn)?);
@@ -86,7 +66,8 @@ fn main() -> Result<()> {
     for vm in VM::list(&conn)? {
         VM::delete_by_id(vm, &conn)?;
     }
-    /*
+    */
+
     let mut network = Network::new(None, Some(0), Some("10.20.30.0/24".into()), &conn)
         .expect("failed to create network");
 
@@ -108,7 +89,6 @@ fn main() -> Result<()> {
 
     println!("{}", domain.to_xml(&conn).unwrap());
     domain.build(&conn)?;
-    */
 
     conn.close()?;
     Ok(())

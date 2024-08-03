@@ -509,19 +509,6 @@ impl VM {
                                 .with_attribute(("type", "virtio"))
                                 .write_empty()?;
 
-                            /*
-                            writer
-                                .create_element("vlan")
-                                .write_inner_content::<_, VirtusError>(|writer| {
-                                    writer
-                                        .create_element("tag")
-                                        .with_attribute(("id", "20"))
-                                        .write_empty()?;
-
-                                    Ok(())
-                                })?;
-                            */
-
                             Ok(())
                         })?;
                 }
