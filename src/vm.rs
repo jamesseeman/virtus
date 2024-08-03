@@ -1,26 +1,32 @@
 use quick_xml::writer::Writer;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
-use std::error::Error;
+use std::fs;
 use std::io::Cursor;
+use std::path::Path;
 use std::process::Command;
 use uuid::Uuid;
 
-use crate::VirtusError;
+use crate::{Connection, VirtusError};
 use anyhow::Result;
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Disk {
     id: Uuid,
     filename: String,
-    size: usize,
+    size: u64,
 }
 
 impl Disk {
-    pub fn create(size: usize) -> Result<Self> {
+    pub fn new(size: u64, conn: &Connection) -> Result<Self> {
+        let disk_dir = format!("{}/disks/", &conn.data_dir);
+        if !Path::exists(Path::new(&disk_dir)) {
+            fs::create_dir(&disk_dir)?;
+        }
+
         let id = Uuid::new_v4();
-        let filename = format!("/tmp/{}.qcow2", id);
+        let filename = format!("{}/{}.qcow2", disk_dir, id);
 
         let output = Command::new("sh")
             .arg("-c")
@@ -30,21 +36,32 @@ impl Disk {
         println!("{}", String::from_utf8(output.stdout).unwrap());
 
         if output.status.success() {
-            Ok(Self { id, filename, size })
+            let disk = Self { id, filename, size };
+            conn.db
+                .open_tree("disks")?
+                .insert(id, bincode::serialize(&disk)?)?;
+            Ok(disk)
         } else {
-            println!("{}", String::from_utf8(output.stderr).unwrap());
             Err(VirtusError::DiskError.into())
         }
     }
 
-    pub fn delete(self) -> Result<String> {
+    pub fn delete(self, conn: &Connection) -> Result<String> {
+        // Todo: check if a VM is using disk
         std::fs::remove_file(&self.filename)?;
-
+        conn.db.open_tree("disks")?.remove(self.id)?;
         Ok(self.filename.clone())
+    }
+
+    pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Self>> {
+        match conn.db.open_tree("disks")?.get(id)? {
+            Some(disk) => Ok(Some(bincode::deserialize(&disk)?)),
+            None => Ok(None),
+        }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Image {
     id: Uuid,
     installer: bool,
@@ -52,12 +69,16 @@ pub struct Image {
 }
 
 impl Image {
-    pub fn new(filename: String, installer: bool) -> Self {
-        Self {
+    pub fn new(filename: String, installer: bool, conn: &Connection) -> Result<Self> {
+        let image = Self {
             id: Uuid::new_v4(),
             filename,
             installer,
-        }
+        };
+        conn.db
+            .open_tree("images")?
+            .insert(image.id, bincode::serialize(&image)?)?;
+        Ok(image)
     }
 
     pub fn get_filename(&self) -> String {
@@ -67,52 +88,44 @@ impl Image {
     pub fn is_installer(&self) -> bool {
         self.installer
     }
+
+    pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Self>> {
+        match conn.db.open_tree("images")?.get(id)? {
+            Some(image) => Ok(bincode::deserialize(&image)?),
+            None => Ok(None),
+        }
+    }
+
+    //todo delete
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Network {
     id: Uuid,
-    interface_id: String,
-    vlan: i32,
+    vlan: u32,
     name: Option<String>,
-    internal: bool,
     cidr4: Option<String>,
+    interfaces: Vec<Uuid>,
 }
 
 impl Network {
     pub fn new(
-        vlan: Option<i32>,
         name: Option<String>,
-        internal: bool,
+        vlan: Option<u32>,
         cidr4: Option<String>,
-    ) -> Result<Self, Box<dyn Error>> {
-        let id = Uuid::new_v4();
-        let vlan_id = vlan.unwrap_or(0);
-
-        let interface_id = id.to_string()[..8].to_string();
-
-        println!("{} {}", id, vlan_id);
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg(format!(
-                "ovs-vsctl add-port virtus-int {} tag={} -- set interface {} type=internal",
-                interface_id, vlan_id, interface_id
-            ))
-            .output()?;
-
-        if output.status.success() {
-            Ok(Self {
-                id,
-                interface_id,
-                vlan: vlan_id,
-                name,
-                internal,
-                cidr4,
-            })
-        } else {
-            println!("{}", String::from_utf8(output.stderr).unwrap());
-            return Err("failed to create network".into());
-        }
+        conn: &Connection,
+    ) -> Result<Self> {
+        let network = Self {
+            id: Uuid::new_v4(),
+            name,
+            vlan: vlan.unwrap_or(0),
+            cidr4,
+            interfaces: vec![],
+        };
+        conn.db
+            .open_tree("networks")?
+            .insert(network.id, bincode::serialize(&network)?)?;
+        Ok(network)
     }
 
     pub fn get_id(&self) -> Uuid {
@@ -123,16 +136,71 @@ impl Network {
         self.name.clone()
     }
 
-    pub fn get_vlan(&self) -> i32 {
+    pub fn get_vlan(&self) -> u32 {
         self.vlan
     }
 
-    pub fn set_vlan(&self, vlan: i32) {
+    pub fn set_vlan(&self, vlan: u32) {
         todo!();
+    }
+
+    // todo: delete
+
+    pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Self>> {
+        match conn.db.open_tree("networks")?.get(id)? {
+            Some(network) => Ok(bincode::deserialize(&network)?),
+            None => Ok(None),
+        }
     }
 }
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Interface {
+    id: Uuid,
+    network: Uuid,
+    mac_addr: Option<[u8; 6]>,
+    link_name: String,
+}
+
+impl Interface {
+    pub fn new(network: &mut Network, conn: &Connection) -> Result<Self> {
+        let id = Uuid::new_v4();
+        let link_name = id.to_string()[..8].to_string();
+        let interface = Self {
+            id,
+            network: network.id,
+            mac_addr: None,
+            link_name: link_name.clone(),
+        };
+
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "ovs-vsctl add-port virtus-int {} tag={} -- set interface {} type=internal",
+                link_name, network.vlan, link_name
+            ))
+            .output()?;
+
+        if output.status.success() {
+            network.interfaces.push(id);
+            conn.db
+                .open_tree("interfaces")?
+                .insert(id, bincode::serialize(&interface)?)?;
+            Ok(interface)
+        } else {
+            Err(VirtusError::OVSError.into())
+        }
+    }
+
+    pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Interface>> {
+        match conn.db.open_tree("interfaces")?.get(id)? {
+            Some(interface) => Ok(bincode::deserialize(&interface)?),
+            None => Ok(None),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub enum State {
     UNDEFINED,
     RUNNING,
@@ -140,68 +208,106 @@ pub enum State {
     PAUSED,
 }
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct VM {
     id: Uuid,
     name: String,
     cpus: u8,
     memory: u64,
-    disk: Option<Disk>,
-    image: Option<Image>,
-    network: Option<Network>,
+    disks: Vec<Uuid>,
+    image: Uuid,
+    interfaces: Vec<Uuid>,
+    #[serde(skip)]
     domain: Option<virt::domain::Domain>,
     state: State,
 }
 
 impl VM {
+    // todo replace struct ref with uuid (ref?)
     pub fn new(
         name: &str,
         cpus: u8,
         memory: u64,
-        disk: Disk,
-        image: Image,
-        network: Network,
-    ) -> Self {
-        Self {
+        size: u64,
+        image: &Image,
+        network: &mut Network,
+        conn: &Connection,
+    ) -> Result<Self> {
+        let disk = Disk::new(size, conn)?;
+        let interface = Interface::new(network, conn)?;
+        let vm = Self {
             id: Uuid::new_v4(),
             name: String::from(name),
             cpus,
             memory,
-            disk: Some(disk),
-            image: Some(image),
-            network: Some(network),
+            disks: vec![disk.id],
+            image: image.id,
+            interfaces: vec![interface.id],
             domain: None,
             state: State::UNDEFINED,
-        }
+        };
+        conn.db
+            .open_tree("virtual_machines")?
+            .insert(vm.id, bincode::serialize(&vm)?)?;
+        Ok(vm)
     }
 
-    pub fn to_xml(&self) -> Result<String> {
+    pub fn attach_network(&self, network: &Network) -> Result<Interface> {
+        todo!();
+    }
+
+    pub fn attach_disk(&self, disk: &Disk) -> Result<()> {
+        todo!();
+    }
+
+    pub fn add_disk(&self, size: u64, image: Option<Image>) -> Result<Disk> {
+        todo!();
+    }
+
+    pub fn detach_disk(&self, disk: &Disk, delete: bool) -> Result<()> {
+        todo!();
+    }
+
+    pub fn detach_network(&self, network: &Network) -> Result<()> {
+        todo!();
+    }
+
+    pub fn to_xml(&self, conn: &Connection) -> Result<String> {
         let mut writer = Writer::new(Cursor::new(Vec::new()));
 
+        // <domain type=kvm>
         let mut domain = BytesStart::new("domain");
         domain.push_attribute(("type", "kvm"));
         writer.write_event(Event::Start(domain))?;
 
+        // <name>
         writer
             .create_element("name")
-            .write_text_content(BytesText::new(&self.name.clone()))?;
+            .write_text_content(BytesText::new(&self.name))?;
 
+        // <uuid>
         writer
             .create_element("uuid")
             .write_text_content(BytesText::new(&self.id.to_string()))?;
 
+        // <memory unit=bytes>
         writer
             .create_element("memory")
-            .with_attribute(("unit", "MB"))
+            .with_attribute(("unit", "bytes"))
             .write_text_content(BytesText::new(&self.memory.to_string()))?;
 
+        // <vcpu>
         writer
             .create_element("vcpu")
             .write_text_content(BytesText::new(&self.cpus.to_string()))?;
 
+        // <os>
+        //  <type arch=x86_64 machine=q35>hvm</type>
+        //  <boot dev=hd />
+        // </os>
         writer
             .create_element("os")
-            .write_inner_content::<_, VirtusError>(|writer| {
+            .write_inner_content::<_, anyhow::Error>(|writer| {
                 writer
                     .create_element("type")
                     .with_attributes([("arch", "x86_64"), ("machine", "q35")])
@@ -215,39 +321,45 @@ impl VM {
                 Ok(())
             })?;
 
+        // <devices>
         writer
             .create_element("devices")
-            .write_inner_content::<_, VirtusError>(|writer| {
-                /*
-                                writer
-                                    .create_element("disk")
-                                    .with_attributes([("type", "file"), ("device", "disk")])
-                                    .write_inner_content::<_, VirtusError>(|writer| {
-                                        writer
-                                            .create_element("driver")
-                                            .with_attributes([("name", "qemu"), ("type", "qcow2")])
-                                            .write_empty()?;
+            .write_inner_content::<_, anyhow::Error>(|writer| {
+                for disk_id in &self.disks {
+                    let disk = Disk::get(disk_id, conn)?.unwrap();
 
-                                        writer
-                                            .create_element("source")
-                                            .with_attribute(("file", self.disk.filename.as_str()))
-                                            .write_empty()?;
+                    // <disk type=file device=disk>
+                    //  <driver name=qemu type=qcow2 />
+                    writer
+                        .create_element("disk")
+                        .with_attributes([("type", "file"), ("device", "disk")])
+                        .write_inner_content::<_, anyhow::Error>(|writer| {
+                            writer
+                                .create_element("driver")
+                                .with_attributes([("name", "qemu"), ("type", "qcow2")])
+                                .write_empty()?;
 
-                                        writer
-                                            .create_element("target")
-                                            .with_attributes([("dev", "vda"), ("bus", "virtio")])
-                                            .write_empty()?;
+                            writer
+                                .create_element("source")
+                                .with_attribute(("file", disk.filename.as_str()))
+                                .write_empty()?;
 
-                                        Ok(())
-                                    })?;
-                */
+                            writer
+                                .create_element("target")
+                                .with_attributes([("dev", "vda"), ("bus", "virtio")])
+                                .write_empty()?;
+
+                            Ok(())
+                        })?;
+                }
 
                 // Installer CDROM
-                if let Some(image) = &self.image {
+                let image = Image::get(&self.image, conn)?.unwrap();
+                if image.installer {
                     writer
                         .create_element("disk")
                         .with_attributes([("type", "file"), ("device", "cdrom")])
-                        .write_inner_content::<_, VirtusError>(|writer| {
+                        .write_inner_content::<_, anyhow::Error>(|writer| {
                             writer
                                 .create_element("driver")
                                 .with_attributes([("name", "qemu"), ("type", "raw")])
@@ -268,7 +380,8 @@ impl VM {
                 }
 
                 // OVS NIC
-                if let Some(network) = &self.network {
+                for interface_id in &self.interfaces {
+                    let interface = Interface::get(&interface_id, conn)?.unwrap();
                     writer
                         .create_element("interface")
                         .with_attribute(("type", "direct"))
@@ -276,7 +389,7 @@ impl VM {
                             writer
                                 .create_element("source")
                                 .with_attributes([
-                                    ("dev", network.interface_id.to_string().as_str()),
+                                    ("dev", interface.link_name.as_str()),
                                     ("mode", "bridge"),
                                 ])
                                 .write_empty()?;
@@ -290,19 +403,21 @@ impl VM {
                         })?;
                 }
 
-                // Console
+                // <console type=pty />
                 writer
                     .create_element("console")
                     .with_attribute(("type", "pty"))
                     .write_empty()?;
 
-                // Table (provides absolute cursor movement)
+                // <table type=tablet bus=usb /> (provides absolute cursor movement)
                 writer
                     .create_element("input")
                     .with_attributes([("type", "tablet"), ("bus", "usb")])
                     .write_empty()?;
 
-                // Spice graphics device
+                // <graphics type=spice port=-1 tlsPort=-1 autoport=yes> (graphics device)
+                //  <image compression=off />
+                // </graphics>
                 writer
                     .create_element("graphics")
                     .with_attributes([
@@ -320,7 +435,9 @@ impl VM {
                         Ok(())
                     })?;
 
-                // RNG
+                // <rng model=virtio>
+                //  <backend model=random>/dev/urandom</backend>
+                // </rng>
                 writer
                     .create_element("rng")
                     .with_attribute(("model", "virtio"))
@@ -336,15 +453,16 @@ impl VM {
                 Ok(())
             })?;
 
+        // </domain>
         writer.write_event(Event::End(BytesEnd::new("domain")))?;
         let xml = writer.into_inner().into_inner();
         Ok(String::from_utf8(xml).unwrap())
     }
 
-    pub fn build(&mut self, conn: &crate::Connection) -> Result<()> {
+    pub fn build(&mut self, conn: &Connection) -> Result<()> {
         self.domain = Some(virt::domain::Domain::create_xml(
             &conn.virt,
-            &self.to_xml().unwrap(),
+            &self.to_xml(conn).unwrap(),
             virt::sys::VIR_DOMAIN_NONE,
         )?);
 
@@ -361,30 +479,40 @@ impl VM {
         Ok(())
     }
 
-    pub fn find(name: &str, conn: &crate::Connection) -> Result<Option<Self>, VirtusError> {
-        let domains = conn.virt.list_all_domains(virt::sys::VIR_CONNECT_LIST_DOMAINS_ACTIVE)?;
-        let mut found: Vec<virt::domain::Domain> = domains
-            .into_iter()
-            .filter(|domain| domain.get_name().unwrap() == name)
-            .collect();
+    pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Self>> {
+        match conn.db.open_tree("virtual_machines")?.get(id)? {
+            Some(vm) => {
+                let mut deserialized_vm: VM = bincode::deserialize(&vm)?;
+                let mut found: Vec<virt::domain::Domain> = conn
+                    .virt
+                    .list_all_domains(virt::sys::VIR_CONNECT_LIST_DOMAINS_ACTIVE)?
+                    .into_iter()
+                    .filter(|domain| {
+                        domain.get_uuid_string().unwrap() == deserialized_vm.id.to_string()
+                    })
+                    .collect();
 
-        match found.len() {
-            0 => Ok(None),
-            _ => {
-                let domain = found.remove(0);
+                match found.pop() {
+                    Some(domain) => {
+                        deserialized_vm.domain = Some(domain);
+                        Ok(Some(deserialized_vm))
+                    }
+                    None => Ok(None),
+                }
+            }
+            None => Ok(None),
+        }
+    }
 
-                Ok(Some(Self {
-                    id: Uuid::parse_str(domain.get_uuid_string().unwrap().as_str())?,
-                    name: domain.get_name()?,
-                    cpus: domain.get_max_vcpus()?.try_into().unwrap(),
-                    memory: domain.get_max_memory().unwrap() / 1024,
-                    disk: None,
-                    image: None,
-                    network: None,
-                    domain: Some(domain),
-                    state: State::RUNNING,
-                }))
+    pub fn find(name: &str, conn: &Connection) -> Result<Option<Self>> {
+        for result in conn.db.open_tree("virtual_machines")?.into_iter() {
+            let (_, vm) = result?;
+            let deserialized_vm: VM = bincode::deserialize(&vm)?;
+            if deserialized_vm.name == name {
+                return VM::get(&deserialized_vm.id, conn);
             }
         }
+
+        Ok(None)
     }
 }

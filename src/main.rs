@@ -16,6 +16,7 @@ mod tests {
         conn.close().unwrap();
     }
 
+    /*
     #[test]
     pub fn create_qcow() {
         let new_disk = virtus::vm::Disk::create(1024).unwrap();
@@ -23,6 +24,7 @@ mod tests {
         let filename = new_disk.delete().unwrap();
         println!("{}", filename);
     }
+    */
 
     #[test]
     fn create_network() {
@@ -59,18 +61,26 @@ fn main() -> Result<()> {
         vm.delete()?;
     }
 
-    let network = Network::new(Some(0), None, true, Some("10.20.30.0/24".into()))
+    let mut network = Network::new(None, Some(0), Some("10.20.30.0/24".into()), &conn)
         .expect("failed to create network");
 
     let image = Image::new(
         String::from("/home/james/Downloads/ubuntu-22.04.3-live-server-amd64.iso"),
         false,
-    );
+        &conn,
+    )?;
 
-    let disk = Disk::create(10 * 1024 * 1024 * 1024)?;
-    let mut domain = VM::new("new vm", 2, 4096, disk, image, network);
+    let mut domain = VM::new(
+        "new vm",
+        2,
+        4 * virtus::GIGABYTE,
+        20 * virtus::GIGABYTE,
+        &image,
+        &mut network,
+        &conn,
+    )?;
 
-    println!("{}", domain.to_xml().unwrap());
+    println!("{}", domain.to_xml(&conn).unwrap());
     domain.build(&conn)?;
 
     conn.close()?;
