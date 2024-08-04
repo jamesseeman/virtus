@@ -73,9 +73,20 @@ impl Interface {
         Ok(interfaces)
     }
 
-    pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
+    pub async fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
         // todo: handle when attached to vm
         if let Some(interface) = Interface::get(&id, &conn)? {
+            conn.handle
+                .link()
+                .del(interface.veth_pair.0)
+                .execute()
+                .await?;
+            conn.handle
+                .link()
+                .del(interface.veth_pair.1)
+                .execute()
+                .await?;
+
             let mut network = Network::get(&interface.network, &conn)?.unwrap();
             network.remove_interface(&interface.id, &conn)?;
             conn.db.open_tree("interfaces")?.remove(id)?;
@@ -84,8 +95,11 @@ impl Interface {
         Ok(())
     }
 
-    pub fn delete(self, conn: &Connection) -> Result<()> {
+    pub async fn delete(self, conn: &Connection) -> Result<()> {
         // todo: handle when attached to vm
+        conn.handle.link().del(self.veth_pair.0).execute().await?;
+        conn.handle.link().del(self.veth_pair.1).execute().await?;
+
         let mut network = Network::get(&self.network, &conn)?.unwrap();
         network.remove_interface(&self.id, &conn)?;
         conn.db.open_tree("interfaces")?.remove(self.id)?;

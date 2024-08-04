@@ -151,12 +151,12 @@ impl Network {
         Ok(networks)
     }
 
-    pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
+    pub async fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
         // todo: handle when network (ip link) doesn't exist
         // todo: handle when attached to vm
         if let Some(network) = Network::get(&id, &conn)? {
             for interface in network.interfaces {
-                Interface::delete_by_id(interface, &conn)?;
+                Interface::delete_by_id(interface, &conn).await?;
             }
 
             conn.db.open_tree("networks")?.remove(id)?;
@@ -165,11 +165,11 @@ impl Network {
         Ok(())
     }
 
-    pub fn delete(self, conn: &Connection) -> Result<()> {
+    pub async fn delete(self, conn: &Connection) -> Result<()> {
         // todo: handle when network (ip link) doesn't exist
         // todo: handle when attached to vm
         for interface in self.interfaces {
-            Interface::delete_by_id(interface, &conn)?;
+            Interface::delete_by_id(interface, &conn).await?;
         }
         conn.db.open_tree("networks")?.remove(self.id)?;
         Ok(())

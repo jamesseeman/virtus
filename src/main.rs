@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
 
     if let Ok(Some(vm)) = VM::find("new vm", &conn) {
         println!("{:?}", vm);
-        vm.delete(&conn)?;
+        vm.delete(&conn).await?;
     }
 
     /*

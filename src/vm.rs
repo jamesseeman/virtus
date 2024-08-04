@@ -330,7 +330,7 @@ impl VM {
         }
     }
 
-    pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
+    pub async fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
         if let Some(vm) = VM::get(&id, &conn)? {
             match vm.get_state()? {
                 // self.domain.unwrap() should be fine, since get_state()
@@ -349,7 +349,7 @@ impl VM {
             }
 
             for interface in vm.interfaces {
-                Interface::delete_by_id(interface, &conn)?;
+                Interface::delete_by_id(interface, &conn).await?;
             }
 
             conn.db.open_tree("virtual_machines")?.remove(id)?;
@@ -358,7 +358,7 @@ impl VM {
         Ok(())
     }
 
-    pub fn delete(self, conn: &Connection) -> Result<()> {
+    pub async fn delete(self, conn: &Connection) -> Result<()> {
         match self.get_state()? {
             // self.domain.unwrap() should be fine, since get_state()
             // returned successfully with VMState
@@ -376,7 +376,7 @@ impl VM {
         }
 
         for interface in self.interfaces {
-            Interface::delete_by_id(interface, &conn)?;
+            Interface::delete_by_id(interface, &conn).await?;
         }
 
         conn.db.open_tree("virtual_machines")?.remove(self.id)?;
