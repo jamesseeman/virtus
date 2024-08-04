@@ -1,5 +1,5 @@
 use anyhow::Result;
-use virtus::{config::Config, vm::*};
+use virtus::*;
 
 #[cfg(test)]
 mod tests {
@@ -39,14 +39,14 @@ fn main() -> Result<()> {
         println!("{:?}", vm);
         vm.delete(&conn)?;
     }
-    
+
     /*
     println!("Disks: {:?}", Disk::list(&conn)?);
     println!("Images: {:?}", Image::list(&conn)?);
     println!("Networks: {:?}", Network::list(&conn)?);
     println!("Interfaces: {:?}", Interface::list(&conn)?);
     println!("VMs: {:?}", VM::list(&conn)?);
-    
+
     for disk in Disk::list(&conn)? {
         Disk::delete_by_id(disk, &conn)?;
     }

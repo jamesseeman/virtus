@@ -5,8 +5,7 @@ A virtual machine orchestrator built on libvirt, written in Rust.
 The compute units in virtus are *servers* (synonymous with virtual machine), not instances.
 
 ### To-do
-
-- overhaul errors w anyhow & thiserror
+- add sled k/v persistence for attribute setters
 - replace String with &str where appropriate
 - check if vm name exists
 

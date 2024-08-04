@@ -1,307 +1,13 @@
+use crate::{Connection, Disk, Error, Image, Interface, Network};
+use anyhow::Result;
+use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::writer::Writer;
 use serde::{Deserialize, Serialize};
-
-use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
-use std::fs;
 use std::io::Cursor;
-use std::path::Path;
-use std::process::Command;
 use uuid::Uuid;
 
-use crate::{Connection, VirtusError};
-use anyhow::Result;
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Disk {
-    id: Uuid,
-    filename: String,
-    size: u64,
-}
-
-impl Disk {
-    pub fn new(size: u64, conn: &Connection) -> Result<Self> {
-        let disk_dir = format!("{}/disks", &conn.data_dir);
-        if !Path::exists(Path::new(&disk_dir)) {
-            fs::create_dir(&disk_dir)?;
-        }
-
-        let id = Uuid::new_v4();
-        let filename = format!("{}/{}.qcow2", disk_dir, id);
-
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg(format!("qemu-img create -f qcow2 {} {}", filename, size))
-            .output()?;
-
-        if output.status.success() {
-            let disk = Self { id, filename, size };
-            conn.db
-                .open_tree("disks")?
-                .insert(id, bincode::serialize(&disk)?)?;
-            Ok(disk)
-        } else {
-            Err(VirtusError::DiskError.into())
-        }
-    }
-
-    pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
-        // todo: check if a VM is using disk
-        // todo: handle when file has already been deleted
-        let tree = conn.db.open_tree("disks")?;
-        if let Some(found) = tree.get(id)? {
-            let disk: Disk = bincode::deserialize(&found)?;
-            std::fs::remove_file(disk.filename)?;
-        }
-
-        tree.remove(id)?;
-        Ok(())
-    }
-
-    pub fn delete(self, conn: &Connection) -> Result<String> {
-        // todo: check if a VM is using disk
-        // todo: handle when file has already been deleted
-        std::fs::remove_file(&self.filename)?;
-        conn.db.open_tree("disks")?.remove(self.id)?;
-        Ok(self.filename.clone())
-    }
-
-    pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Self>> {
-        match conn.db.open_tree("disks")?.get(id)? {
-            Some(disk) => Ok(Some(bincode::deserialize(&disk)?)),
-            None => Ok(None),
-        }
-    }
-
-    pub fn list(conn: &Connection) -> Result<Vec<Uuid>> {
-        let disks: Vec<Uuid> = conn
-            .db
-            .open_tree("disks")?
-            .into_iter()
-            .filter_map(|result| result.ok())
-            .filter_map(|option| Uuid::from_slice(&option.0).ok())
-            .collect();
-
-        Ok(disks)
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Image {
-    id: Uuid,
-    installer: bool,
-    filename: String,
-}
-
-impl Image {
-    pub fn new(filename: String, installer: bool, conn: &Connection) -> Result<Self> {
-        let image = Self {
-            id: Uuid::new_v4(),
-            filename,
-            installer,
-        };
-        conn.db
-            .open_tree("images")?
-            .insert(image.id, bincode::serialize(&image)?)?;
-        Ok(image)
-    }
-
-    pub fn get_filename(&self) -> String {
-        self.filename.clone()
-    }
-
-    pub fn is_installer(&self) -> bool {
-        self.installer
-    }
-
-    pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Self>> {
-        match conn.db.open_tree("images")?.get(id)? {
-            Some(image) => Ok(Some(bincode::deserialize(&image)?)),
-            None => Ok(None),
-        }
-    }
-
-    pub fn list(conn: &Connection) -> Result<Vec<Uuid>> {
-        let images: Vec<Uuid> = conn
-            .db
-            .open_tree("images")?
-            .into_iter()
-            .filter_map(|result| result.ok())
-            .filter_map(|option| Uuid::from_slice(&option.0).ok())
-            .collect();
-
-        Ok(images)
-    }
-
-    pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
-        conn.db.open_tree("images")?.remove(id)?;
-        Ok(())
-    }
-
-    pub fn delete(self, conn: &Connection) -> Result<()> {
-        conn.db.open_tree("images")?.remove(self.id)?;
-        Ok(())
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Network {
-    id: Uuid,
-    vlan: u32,
-    name: Option<String>,
-    cidr4: Option<String>,
-    interfaces: Vec<Uuid>,
-}
-
-impl Network {
-    pub fn new(
-        name: Option<String>,
-        vlan: Option<u32>,
-        cidr4: Option<String>,
-        conn: &Connection,
-    ) -> Result<Self> {
-        let network = Self {
-            id: Uuid::new_v4(),
-            name,
-            vlan: vlan.unwrap_or(0),
-            cidr4,
-            interfaces: vec![],
-        };
-        conn.db
-            .open_tree("networks")?
-            .insert(network.id, bincode::serialize(&network)?)?;
-        Ok(network)
-    }
-
-    pub fn get_id(&self) -> Uuid {
-        self.id
-    }
-
-    pub fn get_name(&self) -> Option<String> {
-        self.name.clone()
-    }
-
-    pub fn get_vlan(&self) -> u32 {
-        self.vlan
-    }
-
-    pub fn set_vlan(&self, vlan: u32) {
-        todo!();
-    }
-
-    pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Self>> {
-        match conn.db.open_tree("networks")?.get(id)? {
-            Some(network) => Ok(Some(bincode::deserialize(&network)?)),
-            None => Ok(None),
-        }
-    }
-
-    pub fn list(conn: &Connection) -> Result<Vec<Uuid>> {
-        let networks: Vec<Uuid> = conn
-            .db
-            .open_tree("networks")?
-            .into_iter()
-            .filter_map(|result| result.ok())
-            .filter_map(|option| Uuid::from_slice(&option.0).ok())
-            .collect();
-
-        Ok(networks)
-    }
-
-    pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
-        // todo: handle when network doesn't exist
-        if let Some(network) = Network::get(&id, &conn)? {
-            for interface in network.interfaces {
-                Interface::delete_by_id(interface, &conn)?;
-            }
-
-            conn.db.open_tree("networks")?.remove(id)?;
-        }
-
-        Ok(())
-    }
-
-    pub fn delete(self, conn: &Connection) -> Result<()> {
-        for interface in self.interfaces {
-            Interface::delete_by_id(interface, &conn)?;
-        }
-        conn.db.open_tree("networks")?.remove(self.id)?;
-        Ok(())
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Interface {
-    id: Uuid,
-    network: Uuid,
-    mac_addr: Option<[u8; 6]>,
-    link_name: String,
-}
-
-impl Interface {
-    // todo: persist interface <-> network vector to kv store
-    pub fn new(network: &mut Network, conn: &Connection) -> Result<Self> {
-        let id = Uuid::new_v4();
-        let link_name = id.to_string()[..8].to_string();
-        let interface = Self {
-            id,
-            network: network.id,
-            mac_addr: None,
-            link_name: link_name.clone(),
-        };
-
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg(format!(
-                "ovs-vsctl add-port virtus-int {} tag={} -- set interface {} type=internal",
-                link_name, network.vlan, link_name
-            ))
-            .output()?;
-
-        if output.status.success() {
-            network.interfaces.push(id);
-            conn.db
-                .open_tree("interfaces")?
-                .insert(id, bincode::serialize(&interface)?)?;
-            Ok(interface)
-        } else {
-            Err(VirtusError::OVSError.into())
-        }
-    }
-
-    pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Interface>> {
-        match conn.db.open_tree("interfaces")?.get(id)? {
-            Some(interface) => Ok(Some(bincode::deserialize(&interface)?)),
-            None => Ok(None),
-        }
-    }
-
-    pub fn list(conn: &Connection) -> Result<Vec<Uuid>> {
-        let interfaces: Vec<Uuid> = conn
-            .db
-            .open_tree("interfaces")?
-            .into_iter()
-            .filter_map(|result| result.ok())
-            .filter_map(|option| Uuid::from_slice(&option.0).ok())
-            .collect();
-
-        Ok(interfaces)
-    }
-
-    pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
-        // todo: update parent network interfaces
-        conn.db.open_tree("interfaces")?.remove(id)?;
-        Ok(())
-    }
-
-    pub fn delete(self, conn: &Connection) -> Result<()> {
-        // todo: update parent network interfaces
-        conn.db.open_tree("interfaces")?.remove(self.id)?;
-        Ok(())
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub enum State {
+pub enum VMState {
     UNDEFINED,
     RUNNING,
     SHUTTING_DOWN,
@@ -334,7 +40,7 @@ impl VM {
         conn: &Connection,
     ) -> Result<Self> {
         if let Some(_) = VM::find(name, conn)? {
-            return Err(VirtusError::VMExists.into());
+            return Err(Error::VMExists.into());
         }
 
         let disk = Disk::new(size, conn)?;
@@ -344,9 +50,9 @@ impl VM {
             name: String::from(name),
             cpus,
             memory,
-            disks: vec![disk.id],
-            image: image.id,
-            interfaces: vec![interface.id],
+            disks: vec![disk.get_id()],
+            image: image.get_id(),
+            interfaces: vec![interface.get_id()],
             domain: None,
         };
         conn.db
@@ -445,7 +151,7 @@ impl VM {
 
                             writer
                                 .create_element("source")
-                                .with_attribute(("file", disk.filename.as_str()))
+                                .with_attribute(("file", disk.get_filename().as_str()))
                                 .write_empty()?;
 
                             writer
@@ -459,7 +165,7 @@ impl VM {
 
                 // Installer CDROM
                 let image = Image::get(&self.image, conn)?.unwrap();
-                if image.installer {
+                if image.is_installer() {
                     writer
                         .create_element("disk")
                         .with_attributes([("type", "file"), ("device", "cdrom")])
@@ -471,7 +177,7 @@ impl VM {
 
                             writer
                                 .create_element("source")
-                                .with_attribute(("file", image.filename.as_str()))
+                                .with_attribute(("file", image.get_filename().as_str()))
                                 .write_empty()?;
 
                             writer
@@ -494,7 +200,7 @@ impl VM {
                     writer
                         .create_element("interface")
                         .with_attribute(("type", "direct"))
-                        .write_inner_content::<_, VirtusError>(|writer| {
+                        .write_inner_content::<_, Error>(|writer| {
                             writer
                                 .create_element("source")
                                 .with_attributes([
@@ -536,7 +242,7 @@ impl VM {
                         ("tlsPort", "-1"),
                         ("autoport", "yes"),
                     ])
-                    .write_inner_content::<_, VirtusError>(|writer| {
+                    .write_inner_content::<_, Error>(|writer| {
                         writer
                             .create_element("image")
                             .with_attribute(("compression", "off"))
@@ -551,7 +257,7 @@ impl VM {
                 writer
                     .create_element("rng")
                     .with_attribute(("model", "virtio"))
-                    .write_inner_content::<_, VirtusError>(|writer| {
+                    .write_inner_content::<_, Error>(|writer| {
                         writer
                             .create_element("backend")
                             .with_attribute(("model", "random"))
@@ -578,38 +284,38 @@ impl VM {
 
     pub fn start(&self) -> Result<()> {
         match self.get_state()? {
-            State::STOPPED => {
+            VMState::STOPPED => {
                 self.domain.as_ref().unwrap().create()?;
                 Ok(())
             }
-            State::PAUSED => {
+            VMState::PAUSED => {
                 self.domain.as_ref().unwrap().resume()?;
                 Ok(())
             }
-            State::SHUTTING_DOWN => return Err(VirtusError::VMShuttingDown.into()),
-            State::UNDEFINED => return Err(VirtusError::VMUndefined.into()),
-            State::RUNNING => Ok(()),
+            VMState::SHUTTING_DOWN => return Err(Error::VMShuttingDown.into()),
+            VMState::UNDEFINED => return Err(Error::VMUndefined.into()),
+            VMState::RUNNING => Ok(()),
         }
     }
 
-    pub fn get_state(&self) -> Result<State> {
+    pub fn get_state(&self) -> Result<VMState> {
         match &self.domain {
             Some(domain) => {
                 match domain.get_state()?.0 {
                     // todo: more granular state mgmt
-                    virt::sys::VIR_DOMAIN_RUNNING => Ok(State::RUNNING),
+                    virt::sys::VIR_DOMAIN_RUNNING => Ok(VMState::RUNNING),
                     virt::sys::VIR_DOMAIN_PAUSED
                     | virt::sys::VIR_DOMAIN_BLOCKED
-                    | virt::sys::VIR_DOMAIN_PMSUSPENDED => Ok(State::PAUSED),
-                    virt::sys::VIR_DOMAIN_SHUTDOWN => Ok(State::SHUTTING_DOWN),
+                    | virt::sys::VIR_DOMAIN_PMSUSPENDED => Ok(VMState::PAUSED),
+                    virt::sys::VIR_DOMAIN_SHUTDOWN => Ok(VMState::SHUTTING_DOWN),
                     // thank you formatter >:(
                     virt::sys::VIR_DOMAIN_SHUTOFF | virt::sys::VIR_DOMAIN_CRASHED => {
-                        Ok(State::STOPPED)
+                        Ok(VMState::STOPPED)
                     }
-                    _ => Ok(State::UNDEFINED),
+                    _ => Ok(VMState::UNDEFINED),
                 }
             }
-            None => Ok(State::UNDEFINED),
+            None => Ok(VMState::UNDEFINED),
         }
     }
 
@@ -617,14 +323,14 @@ impl VM {
         if let Some(vm) = VM::get(&id, &conn)? {
             match vm.get_state()? {
                 // self.domain.unwrap() should be fine, since get_state()
-                // returned successfully with State
-                State::RUNNING | State::SHUTTING_DOWN | State::PAUSED => {
+                // returned successfully with VMState
+                VMState::RUNNING | VMState::SHUTTING_DOWN | VMState::PAUSED => {
                     let domain = vm.domain.unwrap();
                     domain.destroy()?;
                     domain.undefine()?;
                 }
-                State::STOPPED => vm.domain.unwrap().undefine()?,
-                State::UNDEFINED => {}
+                VMState::STOPPED => vm.domain.unwrap().undefine()?,
+                VMState::UNDEFINED => {}
             }
 
             for disk in vm.disks {
@@ -644,14 +350,14 @@ impl VM {
     pub fn delete(self, conn: &Connection) -> Result<()> {
         match self.get_state()? {
             // self.domain.unwrap() should be fine, since get_state()
-            // returned successfully with State
-            State::RUNNING | State::SHUTTING_DOWN | State::PAUSED => {
+            // returned successfully with VMState
+            VMState::RUNNING | VMState::SHUTTING_DOWN | VMState::PAUSED => {
                 let domain = self.domain.unwrap();
                 domain.destroy()?;
                 domain.undefine()?;
             }
-            State::STOPPED => self.domain.unwrap().undefine()?,
-            State::UNDEFINED => {}
+            VMState::STOPPED => self.domain.unwrap().undefine()?,
+            VMState::UNDEFINED => {}
         }
 
         for disk in self.disks {

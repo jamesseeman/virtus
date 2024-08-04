@@ -1,4 +1,4 @@
-use crate::error::VirtusError;
+use crate::Error;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -26,7 +26,7 @@ pub struct Row {
 }
 
 impl TryFrom<Vec<u8>> for Response {
-    type Error = VirtusError;
+    type Error = Error;
 
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
         //println!("{}", String::from_utf8_lossy(&value));

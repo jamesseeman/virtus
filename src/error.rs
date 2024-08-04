@@ -2,7 +2,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 #[error("error occured")]
-pub enum VirtusError {
+pub enum Error {
     #[error("failed to create disk")]
     DiskError,
     #[error("failed to create OVS port")]

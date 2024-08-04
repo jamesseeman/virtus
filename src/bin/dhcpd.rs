@@ -1,5 +1,4 @@
 use tokio::net::UdpSocket;
-use virtus::error::VirtusError;
 //use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
@@ -7,7 +6,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use pnet::datalink;
 use dhcproto::v4::{self, Decodable};
-use virtus::config::Config;
 use std::fs;
 use std::path::Path;
 use anyhow::Result;

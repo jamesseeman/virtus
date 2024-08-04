@@ -1,10 +1,21 @@
-pub mod config;
-pub mod error;
+mod config;
+mod disk;
+mod error;
+mod image;
+mod interface;
+mod network;
 pub mod ovs;
-pub mod vm;
+mod vm;
+
+pub use config::Config;
+pub use disk::Disk;
+pub use error::Error;
+pub use image::Image;
+pub use interface::Interface;
+pub use network::Network;
+pub use vm::*;
 
 use std::{fs, path::Path};
-use error::VirtusError;
 
 pub const KILOBYTE: u64 = 1024;
 pub const MEGABYTE: u64 = 1024 * 1024;
@@ -20,7 +31,7 @@ pub const TERABYTE: u64 = 1024 * 1024 * 1024 * 1024;
 ///
 /// conn.close()?;
 /// ```
-pub fn connect(conf: &config::Config) -> Result<Connection, VirtusError> {
+pub fn connect(conf: &config::Config) -> Result<Connection, Error> {
     if !Path::new(&conf.data_dir).exists() {
         fs::create_dir(&conf.data_dir)?;
     }
@@ -40,7 +51,7 @@ pub struct Connection {
 
 impl Connection {
     /// Closes the connection to the hypervisor.
-    pub fn close(&mut self) -> Result<(), VirtusError> {
+    pub fn close(&mut self) -> Result<(), Error> {
         self.virt.close()?;
         Ok(())
     }
