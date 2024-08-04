@@ -499,7 +499,7 @@ impl VM {
                                 .create_element("source")
                                 .with_attributes([
                                     //                                    ("dev", interface.link_name.as_str()),
-                                    ("dev", "vlan.20"),
+                                    ("dev", "virtus-int"),
                                     ("mode", "passthrough"),
                                 ])
                                 .write_empty()?;
