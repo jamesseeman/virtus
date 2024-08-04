@@ -13,7 +13,6 @@ pub struct Interface {
 }
 
 impl Interface {
-    // todo: persist interface <-> network vector to kv store
     pub fn new(network: &mut Network, conn: &Connection) -> Result<Self> {
         let id = Uuid::new_v4();
         let link_name = id.to_string()[..8].to_string();
@@ -24,29 +23,23 @@ impl Interface {
             link_name: link_name.clone(),
         };
 
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg(format!(
-                "ovs-vsctl add-port virtus-int {} tag={} -- set interface {} type=internal",
-                link_name,
-                network.get_vlan(),
-                link_name
-            ))
-            .output()?;
-
-        if output.status.success() {
-            network.add_interface(&id, &conn)?;
-            conn.db
-                .open_tree("interfaces")?
-                .insert(id, bincode::serialize(&interface)?)?;
-            Ok(interface)
-        } else {
-            Err(Error::OVSError.into())
-        }
+        network.add_interface(&id, &conn)?;
+        conn.db
+            .open_tree("interfaces")?
+            .insert(id, bincode::serialize(&interface)?)?;
+        Ok(interface)
     }
 
     pub fn get_id(&self) -> Uuid {
         self.id
+    }
+
+    pub fn get_network(&self, conn: &Connection) -> Result<Network> {
+        Ok(Network::get(&self.network, &conn)?.unwrap())
+    }
+
+    pub fn get_network_id(&self) -> Uuid {
+        self.network
     }
 
     pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Interface>> {

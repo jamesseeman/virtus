@@ -200,13 +200,17 @@ impl VM {
                     writer
                         .create_element("interface")
                         .with_attribute(("type", "direct"))
-                        .write_inner_content::<_, Error>(|writer| {
+                        .write_inner_content::<_, anyhow::Error>(|writer| {
+                            let device = match interface.get_network(&conn)?.get_physical_uplink() {
+                                Some(uplink) => uplink,
+                                None => String::from("virtus-int"),
+                            };
+
                             writer
                                 .create_element("source")
                                 .with_attributes([
-                                    //                                    ("dev", interface.link_name.as_str()),
-                                    ("dev", "virtus-int"),
-                                    ("mode", "passthrough"),
+                                    ("dev", device.as_str()),
+                                    ("mode", "bridge"),
                                 ])
                                 .write_empty()?;
 

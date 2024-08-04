@@ -32,7 +32,8 @@ mod tests {
     }
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let mut conn = virtus::connect(&Config::new())?;
 
     if let Ok(Some(vm)) = VM::find("new vm", &conn) {
@@ -68,8 +69,19 @@ fn main() -> Result<()> {
     }
     */
 
-    let mut network = Network::new(None, Some(0), Some("10.20.30.0/24".into()), &conn)
-        .expect("failed to create network");
+    let mut network = match Network::get_network_by_uplink("vlan.20", &conn)? {
+        Some(found) => found,
+        None => Network::new(
+            "test network",
+            Some(0),
+            Some("10.20.30.0/24".into()),
+            Some("vlan.20"),
+            &conn,
+        )
+        .await
+        .expect("failed to create network"),
+    };
+    println!("{:?}", network);
 
     let image = Image::new(
         String::from("/home/james/Downloads/ubuntu-22.04.3-live-server-amd64.iso"),

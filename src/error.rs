@@ -21,4 +21,6 @@ pub enum Error {
     VMUndefined,
     #[error("VM is being shut down")]
     VMShuttingDown,
+    #[error("Physical network already exists")]
+    PhysicalNetworkExists
 }
