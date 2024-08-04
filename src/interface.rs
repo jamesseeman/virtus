@@ -69,13 +69,20 @@ impl Interface {
     }
 
     pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
-        // todo: update parent network interfaces
-        conn.db.open_tree("interfaces")?.remove(id)?;
+        // todo: handle when attached to vm
+        if let Some(interface) = Interface::get(&id, &conn)? {
+            let mut network = Network::get(&interface.network, &conn)?.unwrap();
+            network.remove_interface(&interface.id, &conn)?;
+            conn.db.open_tree("interfaces")?.remove(id)?;
+        }
+
         Ok(())
     }
 
     pub fn delete(self, conn: &Connection) -> Result<()> {
-        // todo: update parent network interfaces
+        // todo: handle when attached to vm
+        let mut network = Network::get(&self.network, &conn)?.unwrap();
+        network.remove_interface(&self.id, &conn)?;
         conn.db.open_tree("interfaces")?.remove(self.id)?;
         Ok(())
     }

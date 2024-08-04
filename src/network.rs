@@ -86,7 +86,8 @@ impl Network {
     }
 
     pub fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
-        // todo: handle when network doesn't exist
+        // todo: handle when network (ip link) doesn't exist
+        // todo: handle when attached to vm
         if let Some(network) = Network::get(&id, &conn)? {
             for interface in network.interfaces {
                 Interface::delete_by_id(interface, &conn)?;
@@ -99,6 +100,8 @@ impl Network {
     }
 
     pub fn delete(self, conn: &Connection) -> Result<()> {
+        // todo: handle when network (ip link) doesn't exist
+        // todo: handle when attached to vm
         for interface in self.interfaces {
             Interface::delete_by_id(interface, &conn)?;
         }
