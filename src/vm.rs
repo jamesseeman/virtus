@@ -29,8 +29,8 @@ pub struct VM {
 }
 
 impl VM {
-    // todo replace struct ref with uuid (ref?)
-    pub fn new(
+    // todo replace struct ref with uuid ref?
+    pub async fn new(
         name: &str,
         cpus: u8,
         memory: u64,
@@ -44,7 +44,7 @@ impl VM {
         }
 
         let disk = Disk::new(size, conn)?;
-        let interface = Interface::new(network, conn)?;
+        let interface = Interface::new(network, conn).await?;
         let vm = Self {
             id: Uuid::new_v4(),
             name: String::from(name),
@@ -81,7 +81,7 @@ impl VM {
         todo!();
     }
 
-    pub fn to_xml(&self, conn: &Connection) -> Result<String> {
+    pub async fn to_xml(&self, conn: &Connection) -> Result<String> {
         let mut writer = Writer::new(Cursor::new(Vec::new()));
 
         // <domain type=kvm>
@@ -130,6 +130,22 @@ impl VM {
 
                 Ok(())
             })?;
+
+        // Grabbing all the interface indices here so I don't have to deal with async closures
+        // later
+        //
+        // todo: make this cleaner
+        let mut interfaces = vec![];
+        for id in self.interfaces.iter() {
+            if let Some(interface) = Interface::get(id, &conn)? {
+                let link_index = interface.get_veth_pair().1;
+                if let Some(link) = Network::get_link_by_id(link_index, &conn).await? {
+                    if let Some(link_name) = Network::get_link_name(&link) {
+                        interfaces.push(link_name);
+                    }
+                }
+            }
+        }
 
         // <devices>
         writer
@@ -194,24 +210,15 @@ impl VM {
                         })?;
                 }
 
-                // OVS NIC
-                for interface_id in &self.interfaces {
-                    let interface = Interface::get(&interface_id, conn)?.unwrap();
+                // Bridge NIC
+                for interface in interfaces {
                     writer
                         .create_element("interface")
                         .with_attribute(("type", "direct"))
                         .write_inner_content::<_, anyhow::Error>(|writer| {
-                            let device = match interface.get_network(&conn)?.get_physical_uplink() {
-                                Some(uplink) => uplink,
-                                None => String::from("virtus-int"),
-                            };
-
                             writer
                                 .create_element("source")
-                                .with_attributes([
-                                    ("dev", device.as_str()),
-                                    ("mode", "bridge"),
-                                ])
+                                .with_attributes([("dev", interface.as_str()), ("mode", "bridge")])
                                 .write_empty()?;
 
                             writer
@@ -279,8 +286,8 @@ impl VM {
         Ok(String::from_utf8(xml).unwrap())
     }
 
-    pub fn build(&mut self, conn: &Connection) -> Result<()> {
-        let domain = virt::domain::Domain::define_xml(&conn.virt, &self.to_xml(conn)?)?;
+    pub async fn build(&mut self, conn: &Connection) -> Result<()> {
+        let domain = virt::domain::Domain::define_xml(&conn.virt, &self.to_xml(conn).await?)?;
         domain.create()?;
         self.domain = Some(domain);
         Ok(())

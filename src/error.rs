@@ -22,5 +22,7 @@ pub enum Error {
     #[error("VM is being shut down")]
     VMShuttingDown,
     #[error("Physical network already exists")]
-    PhysicalNetworkExists
+    PhysicalNetworkExists,
+    #[error("Interface not found")]
+    InterfaceNotFound,
 }

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use futures::stream::TryStreamExt;
 use virtus::*;
 
 #[cfg(test)]
@@ -34,7 +35,7 @@ mod tests {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut conn = virtus::connect(&Config::new())?;
+    let mut conn = virtus::connect(&Config::new()).await?;
 
     if let Ok(Some(vm)) = VM::find("new vm", &conn) {
         println!("{:?}", vm);
@@ -69,6 +70,7 @@ async fn main() -> Result<()> {
     }
     */
 
+    /*
     let mut network = match Network::get_network_by_uplink("vlan.20", &conn)? {
         Some(found) => found,
         None => Network::new(
@@ -82,6 +84,12 @@ async fn main() -> Result<()> {
         .expect("failed to create network"),
     };
     println!("{:?}", network);
+    */
+
+    let mut network = match Network::find("t1", &conn)? {
+        Some(network) => network,
+        None => Network::new("t1", Some(0), Some("10.20.30.0/24"), None, &conn).await?,
+    };
 
     let image = Image::new(
         String::from("/home/james/Downloads/ubuntu-22.04.3-live-server-amd64.iso"),
@@ -97,10 +105,11 @@ async fn main() -> Result<()> {
         &image,
         &mut network,
         &conn,
-    )?;
+    )
+    .await?;
 
-    println!("{}", domain.to_xml(&conn).unwrap());
-    domain.build(&conn)?;
+    println!("{}", domain.to_xml(&conn).await?);
+    domain.build(&conn).await?;
 
     conn.close()?;
     Ok(())

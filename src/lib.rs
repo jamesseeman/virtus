@@ -15,6 +15,7 @@ pub use interface::Interface;
 pub use network::Network;
 pub use vm::*;
 
+use netlink_packet_route::RouteNetlinkMessage;
 use std::{fs, path::Path};
 
 pub const KILOBYTE: u64 = 1024;
@@ -31,15 +32,19 @@ pub const TERABYTE: u64 = 1024 * 1024 * 1024 * 1024;
 ///
 /// conn.close()?;
 /// ```
-pub fn connect(conf: &config::Config) -> Result<Connection, Error> {
+pub async fn connect(conf: &config::Config) -> Result<Connection, Error> {
     if !Path::new(&conf.data_dir).exists() {
         fs::create_dir(&conf.data_dir)?;
     }
+
+    let (connection, handle, _) = rtnetlink::new_connection()?;
+    tokio::spawn(connection);
 
     Ok(Connection {
         virt: virt::connect::Connect::open(&conf.libvirt_uri)?,
         db: sled::open(format!("{}/config", &conf.data_dir))?,
         data_dir: conf.data_dir.clone(),
+        handle,
     })
 }
 
@@ -47,6 +52,7 @@ pub struct Connection {
     pub virt: virt::connect::Connect,
     pub db: sled::Db,
     pub data_dir: String,
+    pub handle: rtnetlink::Handle,
 }
 
 impl Connection {

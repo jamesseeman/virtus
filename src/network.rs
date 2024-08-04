@@ -1,5 +1,7 @@
 use crate::{Connection, Error, Interface};
 use anyhow::Result;
+use futures::stream::TryStreamExt;
+use netlink_packet_route::link::{LinkAttribute, LinkMessage};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -7,8 +9,9 @@ use uuid::Uuid;
 pub struct Network {
     id: Uuid,
     vlan: u32,
+    external: bool,
     // Will need to handle uplink being different on different hosts, tuple with node id, int name?
-    physical_uplink: Option<String>,
+    bridge_name: String,
     name: String,
     cidr4: Option<String>,
     interfaces: Vec<Uuid>,
@@ -24,14 +27,21 @@ impl Network {
     ) -> Result<Self> {
         let tree = conn.db.open_tree("networks")?;
 
+        let bridge_name = match physical_uplink {
+            Some(name) => String::from(name),
+            None => String::from("virtus-br"),
+        };
+
         if let Some(uplink) = physical_uplink {
-            if let Some(_) = Network::get_network_by_uplink(uplink, &conn)? {
+            if let Some(_) = Network::get_external_network(uplink, &conn)? {
                 return Err(Error::PhysicalNetworkExists.into());
             }
-        } /*else {
+        } else {
             // Make sure that virtus-br exists
-
-        } */
+            if let None = Network::get_link("virtus-br", &conn).await? {
+                Network::create_bridge("virtus-br", &conn).await?;
+            }
+        }
 
         let network = Self {
             id: Uuid::new_v4(),
@@ -39,7 +49,8 @@ impl Network {
             vlan: vlan.unwrap_or(0),
             cidr4: cidr4.map(|cidr| String::from(cidr)),
             interfaces: vec![],
-            physical_uplink: physical_uplink.map(|uplink| String::from(uplink)),
+            external: physical_uplink.is_some(),
+            bridge_name,
         };
 
         tree.insert(network.id, bincode::serialize(&network)?)?;
@@ -63,11 +74,11 @@ impl Network {
         todo!();
     }
 
-    pub fn get_physical_uplink(&self) -> Option<String> {
-        self.physical_uplink.clone()
+    pub fn get_bridge_name(&self) -> String {
+        self.bridge_name.clone()
     }
 
-    pub fn get_network_by_uplink(uplink: &str, conn: &Connection) -> Result<Option<Network>> {
+    pub fn get_external_network(uplink: &str, conn: &Connection) -> Result<Option<Network>> {
         let string_uplink = String::from(uplink);
 
         // Iterate through each network, convert to struct, grab physical uplink, compare to
@@ -79,12 +90,7 @@ impl Network {
             .into_iter()
             .filter_map(|result| result.ok())
             .filter_map(|(_, network)| bincode::deserialize::<Network>(&network).ok())
-            .filter(|network| {
-                network
-                    .physical_uplink
-                    .as_ref()
-                    .is_some_and(|upl| upl == &string_uplink)
-            })
+            .filter(|network| network.external && network.bridge_name == string_uplink)
             .collect();
 
         Ok(networks.pop())
@@ -117,6 +123,20 @@ impl Network {
             Some(network) => Ok(Some(bincode::deserialize(&network)?)),
             None => Ok(None),
         }
+    }
+
+    pub fn find(name: &str, conn: &Connection) -> Result<Option<Self>> {
+        let string_name = String::from(name);
+        let mut networks: Vec<Network> = conn
+            .db
+            .open_tree("networks")?
+            .into_iter()
+            .filter_map(|result| result.ok())
+            .filter_map(|(_, network)| bincode::deserialize::<Network>(&network).ok())
+            .filter(|network| network.name == string_name)
+            .collect();
+
+        Ok(networks.pop())
     }
 
     pub fn list(conn: &Connection) -> Result<Vec<Uuid>> {
@@ -153,5 +173,57 @@ impl Network {
         }
         conn.db.open_tree("networks")?.remove(self.id)?;
         Ok(())
+    }
+
+    pub async fn get_link(name: &str, conn: &Connection) -> Result<Option<LinkMessage>> {
+        let mut links = conn
+            .handle
+            .link()
+            .get()
+            .match_name(String::from(name))
+            .execute();
+
+        match links.try_next().await {
+            Ok(link) => Ok(link),
+            Err(_) => Ok(None),
+        }
+    }
+
+    pub async fn get_link_by_id(id: u32, conn: &Connection) -> Result<Option<LinkMessage>> {
+        let mut links = conn.handle.link().get().match_index(id).execute();
+
+        match links.try_next().await {
+            Ok(link) => Ok(link),
+            Err(_) => Ok(None),
+        }
+    }
+
+    pub fn get_link_name(link: &LinkMessage) -> Option<String> {
+        for attr in link.attributes.iter() {
+            if let LinkAttribute::IfName(name) = attr {
+                return Some(name.clone());
+            }
+        }
+
+        None
+    }
+
+    pub async fn create_bridge(name: &str, conn: &Connection) -> Result<LinkMessage> {
+        conn.handle
+            .link()
+            .add()
+            .bridge(String::from(name))
+            .execute()
+            .await?;
+
+        let link = Network::get_link(name, conn).await?.unwrap();
+        conn.handle
+            .link()
+            .set(link.header.index)
+            .up()
+            .execute()
+            .await?;
+
+        Ok(link)
     }
 }

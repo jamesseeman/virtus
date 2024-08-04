@@ -1,7 +1,7 @@
 use crate::{Connection, Error, Network};
 use anyhow::Result;
+use netlink_packet_route::link::LinkMessage;
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -9,18 +9,26 @@ pub struct Interface {
     id: Uuid,
     network: Uuid,
     mac_addr: Option<[u8; 6]>,
-    link_name: String,
+    veth_pair: (u32, u32),
 }
 
 impl Interface {
-    pub fn new(network: &mut Network, conn: &Connection) -> Result<Self> {
+    pub async fn new(network: &mut Network, conn: &Connection) -> Result<Self> {
         let id = Uuid::new_v4();
         let link_name = id.to_string()[..8].to_string();
+
+        let (link1, link2) = Interface::create_link(
+            link_name.as_str(),
+            network.get_bridge_name().as_str(),
+            &conn,
+        )
+        .await?;
+
         let interface = Self {
             id,
             network: network.get_id(),
             mac_addr: None,
-            link_name: link_name.clone(),
+            veth_pair: (link1.header.index, link2.header.index),
         };
 
         network.add_interface(&id, &conn)?;
@@ -40,6 +48,10 @@ impl Interface {
 
     pub fn get_network_id(&self) -> Uuid {
         self.network
+    }
+
+    pub fn get_veth_pair(&self) -> (u32, u32) {
+        self.veth_pair
     }
 
     pub fn get(id: &Uuid, conn: &Connection) -> Result<Option<Interface>> {
@@ -78,5 +90,40 @@ impl Interface {
         network.remove_interface(&self.id, &conn)?;
         conn.db.open_tree("interfaces")?.remove(self.id)?;
         Ok(())
+    }
+
+    pub async fn create_link(
+        name: &str,
+        bridge_name: &str,
+        conn: &Connection,
+    ) -> Result<(LinkMessage, LinkMessage)> {
+        match Network::get_link(bridge_name, &conn).await? {
+            Some(bridge) => {
+                conn.handle
+                    .link()
+                    .add()
+                    .veth(format!("{}-1", name), format!("{}-2", name))
+                    .execute()
+                    .await?;
+
+                let link1 = Network::get_link(format!("{}-1", name).as_str(), &conn)
+                    .await?
+                    .unwrap();
+                let link2 = Network::get_link(format!("{}-2", name).as_str(), &conn)
+                    .await?
+                    .unwrap();
+
+                conn.handle
+                    .link()
+                    .set(link1.header.index)
+                    .up()
+                    .controller(bridge.header.index)
+                    .execute()
+                    .await?;
+
+                Ok((link1, link2))
+            }
+            None => Err(Error::InterfaceNotFound.into()),
+        }
     }
 }
