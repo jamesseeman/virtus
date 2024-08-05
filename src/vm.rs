@@ -138,10 +138,16 @@ impl VM {
         let mut interfaces = vec![];
         for id in self.interfaces.iter() {
             if let Some(interface) = Interface::get(id, &conn)? {
-                let link_index = interface.get_veth_pair().1;
-                if let Some(link) = Network::get_link_by_id(link_index, &conn).await? {
-                    if let Some(link_name) = Network::get_link_name(&link) {
-                        interfaces.push(link_name);
+                match interface.get_veth_pair() {
+                    Some((link_id, _)) => {
+                        if let Some(link) = Network::get_link_by_id(link_id, &conn).await? {
+                            if let Some(link_name) = Network::get_link_name(&link) {
+                                interfaces.push(link_name);
+                            }
+                        }
+                    }
+                    None => {
+                        interfaces.push(interface.get_network(&conn)?.get_bridge_name());
                     }
                 }
             }

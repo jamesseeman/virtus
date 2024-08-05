@@ -9,7 +9,7 @@ pub struct Interface {
     id: Uuid,
     network: Uuid,
     mac_addr: Option<[u8; 6]>,
-    veth_pair: (u32, u32),
+    veth_pair: Option<(u32, u32)>,
 }
 
 impl Interface {
@@ -17,18 +17,25 @@ impl Interface {
         let id = Uuid::new_v4();
         let link_name = id.to_string()[..8].to_string();
 
-        let (link1, link2) = Interface::create_link(
-            link_name.as_str(),
-            network.get_bridge_name().as_str(),
-            &conn,
-        )
-        .await?;
+        let veth_pair = match network.is_external() {
+            false => {
+                let (link1, link2) = Interface::create_link(
+                    link_name.as_str(),
+                    network.get_bridge_name().as_str(),
+                    &conn,
+                )
+                .await?;
+
+                Some((link1.header.index, link2.header.index))
+            }
+            true => None,
+        };
 
         let interface = Self {
             id,
             network: network.get_id(),
             mac_addr: None,
-            veth_pair: (link1.header.index, link2.header.index),
+            veth_pair,
         };
 
         network.add_interface(&id, &conn)?;
@@ -50,7 +57,7 @@ impl Interface {
         self.network
     }
 
-    pub fn get_veth_pair(&self) -> (u32, u32) {
+    pub fn get_veth_pair(&self) -> Option<(u32, u32)> {
         self.veth_pair
     }
 
@@ -75,17 +82,13 @@ impl Interface {
 
     pub async fn delete_by_id(id: Uuid, conn: &Connection) -> Result<()> {
         // todo: handle when attached to vm
+        // todo: currently dropping the result, which is good for when the interface doesn't exist
+        // anymore. this is probably correct choice. consider implications of this decision
         if let Some(interface) = Interface::get(&id, &conn)? {
-            conn.handle
-                .link()
-                .del(interface.veth_pair.0)
-                .execute()
-                .await?;
-            conn.handle
-                .link()
-                .del(interface.veth_pair.1)
-                .execute()
-                .await?;
+            if let Some((link1, link2)) = interface.veth_pair {
+                let _ = conn.handle.link().del(link1).execute().await;
+                let _ = conn.handle.link().del(link2).execute().await;
+            }
 
             let mut network = Network::get(&interface.network, &conn)?.unwrap();
             network.remove_interface(&interface.id, &conn)?;
@@ -97,8 +100,10 @@ impl Interface {
 
     pub async fn delete(self, conn: &Connection) -> Result<()> {
         // todo: handle when attached to vm
-        conn.handle.link().del(self.veth_pair.0).execute().await?;
-        conn.handle.link().del(self.veth_pair.1).execute().await?;
+        if let Some((link1, link2)) = self.veth_pair {
+            let _ = conn.handle.link().del(link1).execute().await;
+            let _ = conn.handle.link().del(link2).execute().await;
+        }
 
         let mut network = Network::get(&self.network, &conn)?.unwrap();
         network.remove_interface(&self.id, &conn)?;

@@ -74,6 +74,10 @@ impl Network {
         todo!();
     }
 
+    pub fn is_external(&self) -> bool {
+        self.external
+    }
+
     pub fn get_bridge_name(&self) -> String {
         self.bridge_name.clone()
     }

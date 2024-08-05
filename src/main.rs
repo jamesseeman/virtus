@@ -37,7 +37,7 @@ mod tests {
 async fn main() -> Result<()> {
     let mut conn = virtus::connect(&Config::new()).await?;
 
-    if let Ok(Some(vm)) = VM::find("new vm", &conn) {
+    if let Ok(Some(vm)) = VM::find("new vm 2", &conn) {
         println!("{:?}", vm);
         vm.delete(&conn).await?;
     }
@@ -86,9 +86,14 @@ async fn main() -> Result<()> {
     println!("{:?}", network);
     */
 
-    let mut network = match Network::find("t1", &conn)? {
+    //    let mut network = match Network::find("t1", &conn)? {
+    //        Some(network) => network,
+    //        None => Network::new("t1", Some(0), Some("10.20.30.0/24"), None, &conn).await?,
+    //    };
+
+    let mut network = match Network::find("host", &conn)? {
         Some(network) => network,
-        None => Network::new("t1", Some(0), Some("10.20.30.0/24"), None, &conn).await?,
+        None => Network::new("host", None, None, Some("vlan.20"), &conn).await?,
     };
 
     let image = Image::new(
@@ -98,7 +103,7 @@ async fn main() -> Result<()> {
     )?;
 
     let mut domain = VM::new(
-        "new vm",
+        "new vm 2",
         2,
         4 * virtus::GIGABYTE,
         20 * virtus::GIGABYTE,
