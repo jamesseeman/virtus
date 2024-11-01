@@ -18,6 +18,11 @@ jobs:
     - name: Install protoc
       run: sudo apt install -y protobuf-compiler
     - uses: actions/checkout@v4
+    - name: checkout skiff
+      uses: actions/checkout@v4
+      with:
+        repository: jamesseeman/skiff
+        path: ../
     - name: Build
       run: cargo build --verbose
     - name: Run tests
