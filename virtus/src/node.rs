@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::pool::Pool;
+use crate::virtus::virtus_proto;
 use serde::{Deserialize, Serialize};
 use skiff::Client as SkiffClient;
 use std::net::Ipv4Addr;
@@ -95,5 +96,16 @@ impl Node {
         }
 
         Ok(pools)
+    }
+}
+
+impl From<Node> for virtus_proto::Node {
+    fn from(val: Node) -> Self {
+        virtus_proto::Node {
+            id: val.id.to_string(),
+            ip: val.address.to_string(),
+            hostname: val.hostname,
+            pools: val.pools.into_iter().map(|p| p.to_string()).collect(),
+        }
     }
 }

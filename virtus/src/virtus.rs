@@ -4,6 +4,7 @@ use crate::node::Node;
 use crate::pool::Pool;
 use skiff::{Client as SkiffClient, Skiff};
 use std::net::{Ipv4Addr, SocketAddr};
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -91,7 +92,17 @@ impl virtus_proto::virtus_server::Virtus for Virtus {
         &self,
         request: Request<GetNodeRequest>,
     ) -> Result<Response<GetNodeReply>, Status> {
-        todo!()
+        let id = match Uuid::from_str(&request.into_inner().id) {
+            Ok(id) => id,
+            Err(_) => return Err(Status::invalid_argument("Invalid node ID")),
+        };
+
+        match Node::get(id, &self.client).await {
+            Ok(node) => Ok(Response::new(GetNodeReply {
+                node: node.map(|n| n.into()),
+            })),
+            Err(e) => return Err(Status::internal(e.to_string())),
+        }
     }
 
     async fn list_nodes(
@@ -124,7 +135,17 @@ impl virtus_proto::virtus_server::Virtus for Virtus {
         &self,
         request: Request<GetPoolRequest>,
     ) -> Result<Response<GetPoolReply>, Status> {
-        todo!()
+        let id = match Uuid::from_str(&request.into_inner().id) {
+            Ok(id) => id,
+            Err(_) => return Err(Status::invalid_argument("Invalid pool ID")),
+        };
+
+        match Pool::get(id, &self.client).await {
+            Ok(pool) => Ok(Response::new(GetPoolReply {
+                pool: pool.map(|p| p.into()),
+            })),
+            Err(e) => return Err(Status::internal(e.to_string())),
+        }
     }
 
     async fn list_pools(
@@ -157,7 +178,17 @@ impl virtus_proto::virtus_server::Virtus for Virtus {
         &self,
         request: Request<GetDiskRequest>,
     ) -> Result<Response<GetDiskReply>, Status> {
-        todo!()
+        let id = match Uuid::from_str(&request.into_inner().id) {
+            Ok(id) => id,
+            Err(_) => return Err(Status::invalid_argument("Invalid disk ID")),
+        };
+
+        match Disk::get(id, &self.client).await {
+            Ok(disk) => Ok(Response::new(GetDiskReply {
+                disk: disk.map(|d| d.into()),
+            })),
+            Err(e) => return Err(Status::internal(e.to_string())),
+        }
     }
 
     async fn list_disks(
@@ -205,6 +236,7 @@ mod tests {
         Ok(Builder::new()
             .bind(address.parse().unwrap())
             .set_dir(&dir)
+            .join_cluster(vec!["127.0.0.1".parse().unwrap()])
             .build()
             .unwrap())
     }
@@ -302,5 +334,30 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn two_node_cluster() {}
+    async fn two_node_cluster() {
+        let leader = get_virtus().unwrap();
+        let leader_clone = leader.clone();
+        let handle = tokio::spawn(async move {
+            let _ = leader_clone.start().await;
+        });
+
+        // Give leader time to elect itself
+        // Todo: again, need more reliable method for determining when servers are ready
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+        let follower = get_follower("127.0.0.2").unwrap();
+        let follower_clone = follower.clone();
+        let _ = tokio::spawn(async move {
+            let _ = follower_clone.start().await;
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+        let leader_cluster = leader.skiff.get_cluster().await.unwrap();
+        let follower_cluster = follower.skiff.get_cluster().await.unwrap();
+
+        assert_eq!(leader_cluster, follower_cluster);
+        assert_eq!(2, leader_cluster.len());
+        assert_eq!(2, Node::list(&leader.client).await.unwrap().len());
+    }
 }

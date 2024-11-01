@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::{error::Error, virtus::virtus_proto};
 use serde::{Deserialize, Serialize};
 use skiff::Client as SkiffClient;
 use std::sync::Arc;
@@ -78,5 +78,16 @@ impl Disk {
         }
 
         Ok(disks)
+    }
+}
+
+impl From<Disk> for virtus_proto::Disk {
+    fn from(val: Disk) -> Self {
+        virtus_proto::Disk {
+            id: val.id.to_string(),
+            pool: val.pool_id.to_string(),
+            name: val.name,
+            size: val.size as u64,
+        }
     }
 }

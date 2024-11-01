@@ -1,5 +1,5 @@
-use crate::disk::Disk;
 use crate::error::Error;
+use crate::{disk::Disk, virtus::virtus_proto};
 use serde::{Deserialize, Serialize};
 use skiff::Client as SkiffClient;
 use std::sync::Arc;
@@ -91,5 +91,17 @@ impl Pool {
         self.disks.push(disk.get_id());
         self.commit(client).await?;
         Ok(disk)
+    }
+}
+
+impl From<Pool> for virtus_proto::Pool {
+    fn from(val: Pool) -> Self {
+        virtus_proto::Pool {
+            id: val.id.to_string(),
+            node: val.node_id.to_string(),
+            name: val.name,
+            path: val.path,
+            disks: val.disks.into_iter().map(|id| id.to_string()).collect(),
+        }
     }
 }

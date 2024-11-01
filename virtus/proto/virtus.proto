@@ -87,7 +87,7 @@ message Pool {
     string node = 2;
     optional string name = 3;
     string path = 4;
-    repeated Disk disks = 5;
+    repeated string disks = 5;
 }
 
 message GetPoolReply {
