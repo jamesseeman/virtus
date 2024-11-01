@@ -1,32 +1,32 @@
-use crate::ovs::{Object, interface::Interface};
+use crate::ovs::{port::Port, Object};
 use serde::{Deserialize, Serialize};
 
 #[derive(Default, Serialize, Deserialize, Clone, Debug)]
-pub struct Port {
+pub struct Interface {
     uuid: Option<String>,
-    bridge_name: String,
     name: String,
-    interfaces: Vec<Interface>
+    r#type: String,
 }
 
-impl Port {
-    pub fn new(name: String, bridge_name: String) -> Self {
+impl Interface {
+    pub fn new(name: String, r#type: String) -> Self {
         Self {
-            name: name.clone(),
-            bridge_name: bridge_name,
-            interfaces: vec![Interface::new(name, String::from("internal"))],
+            name: name,
+            r#type: r#type,
             ..Default::default()
         }
     }
 
-    pub fn get_bridge_name(&self) -> String {
-        self.bridge_name.clone()
+    /*
+    pub fn get_port(&self) -> Port {
+        self.port.clone()
     }
+    */
 }
 
-impl Object for Port {
+impl Object for Interface {
     fn get_table(&self) -> String {
-        String::from("Port")
+        String::from("Interface")
     }
 
     fn get_name(&self) -> String {

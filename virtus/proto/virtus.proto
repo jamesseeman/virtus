@@ -1,0 +1,139 @@
+syntax = "proto3";
+package virtus;
+
+service Virtus {
+  rpc AddNode(AddNodeRequest) returns (AddNodeReply);
+  rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeReply);
+  rpc GetNode(GetNodeRequest) returns (GetNodeReply);
+  rpc ListNodes(Empty) returns (ListNodesReply);
+
+  rpc AddPool(AddPoolRequest) returns (AddPoolReply);
+  rpc RemovePool(RemovePoolRequest) returns (RemovePoolReply);
+  rpc GetPool(GetPoolRequest) returns (GetPoolReply);
+  rpc ListPools(Empty) returns (ListPoolsReply);
+
+  rpc AddDisk(AddDiskRequest) returns (AddDiskReply);
+  rpc RemoveDisk(RemoveDiskRequest) returns (RemoveDiskReply);
+  rpc GetDisk(GetDiskRequest) returns (GetDiskReply);
+  rpc ListDisks(Empty) returns (ListDisksReply);
+}
+
+message Empty {}
+
+message AddNodeRequest {
+    string ip = 1;
+    string hostname = 2;
+}
+
+message AddNodeReply {
+    bool success = 1;
+    optional string id = 2;
+}
+
+message RemoveNodeRequest {
+    string id = 1;
+}
+
+message RemoveNodeReply {
+    bool success = 1;
+}
+
+message GetNodeRequest {
+    string id = 1;
+}
+
+message Node {
+    string id = 1;
+    string ip = 2;
+    string hostname = 3;
+    repeated string pools = 4;
+    // repeated string vms = 5;
+    // string docker_socket = 6;
+    // repeated string containers = 7;
+}
+
+message GetNodeReply {
+    optional Node node = 1;
+}
+
+message ListNodesReply {
+    repeated string nodes = 1;
+}
+
+message AddPoolRequest {
+    optional string name = 1;
+    string path = 2;
+}
+
+message AddPoolReply {
+    bool success = 1;
+    optional string id = 2;
+}
+
+message RemovePoolRequest {
+    string id = 1;
+}
+
+message RemovePoolReply {
+    bool success = 1;
+}
+
+message GetPoolRequest {
+    string id = 1;
+}
+
+message Pool {
+    string id = 1;
+    string node = 2;
+    optional string name = 3;
+    string path = 4;
+    repeated Disk disks = 5;
+}
+
+message GetPoolReply {
+    optional Pool pool = 1;
+}
+
+message ListPoolsReply {
+    repeated string pools = 1;
+}
+
+message AddDiskRequest {
+    string pool = 1;
+    optional string name = 2;
+    uint64 size = 3;
+    // optional string source 4;
+}
+
+message AddDiskReply {
+    bool success = 1;
+    optional string id = 2;
+}
+
+message RemoveDiskRequest {
+    string id = 1;
+}
+
+message RemoveDiskReply {
+    bool success = 1;
+}
+
+message GetDiskRequest {
+    string id = 1;
+}
+
+message Disk {
+    string id = 1;
+    string pool = 2;
+    optional string name = 3;
+    uint64 size = 4;
+    // optional string source = 5;
+}
+
+message GetDiskReply {
+    optional Disk disk = 1;
+}
+
+message ListDisksReply {
+    repeated string disks = 1;
+}

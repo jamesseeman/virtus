@@ -18,8 +18,6 @@ fn main() {
         .create(&mut new_port)
         .expect("failed to create port");
 
-
-
     ovs_conn.delete(new_port).expect("failed to delete bridge");
 
     /*
