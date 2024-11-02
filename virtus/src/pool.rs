@@ -2,6 +2,8 @@ use crate::error::Error;
 use crate::{disk::Disk, virtus::virtus_proto};
 use serde::{Deserialize, Serialize};
 use skiff::Client as SkiffClient;
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -29,6 +31,8 @@ impl Pool {
             path: path.to_string(),
             disks: vec![],
         };
+
+        fs::create_dir_all(Path::new(path))?;
 
         pool.commit(client).await?;
         Ok(pool)

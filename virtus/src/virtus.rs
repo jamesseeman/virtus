@@ -2,15 +2,18 @@ use crate::disk::Disk;
 use crate::error::Error;
 use crate::node::Node;
 use crate::pool::Pool;
-use skiff::{Client as SkiffClient, Skiff};
-use std::net::{Ipv4Addr, SocketAddr};
+use skiff::{Client as SkiffClient, ElectionState, Skiff};
+use std::collections::HashMap;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tonic::transport::Server;
+use tonic::metadata::MetadataValue;
+use tonic::transport::{Channel, Server};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
+use virtus_client::VirtusClient;
 use virtus_proto::virtus_server::VirtusServer;
 use virtus_proto::*;
 
@@ -23,6 +26,7 @@ pub struct Virtus {
     id: Uuid,
     address: Ipv4Addr,
     skiff: Arc<Skiff>,
+    peer_clients: Arc<Mutex<HashMap<Uuid, Arc<Mutex<VirtusClient<Channel>>>>>>,
     client: Arc<Mutex<SkiffClient>>,
 }
 
@@ -39,7 +43,61 @@ impl Virtus {
             address,
             skiff: Arc::new(Skiff::new(id, address, data_dir, peers.clone())?),
             client: Arc::new(Mutex::new(SkiffClient::new(vec![address]))),
+            peer_clients: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    pub async fn get_cluster(&self) -> HashMap<Uuid, Node> {
+        //self.skiff.get_cluster().await.unwrap()
+        Node::list(&self.client)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| (n.get_id(), n))
+            .collect()
+    }
+
+    async fn get_peers(&self) -> HashMap<Uuid, Node> {
+        self.get_cluster()
+            .await
+            .into_iter()
+            .filter(|(id, _)| id != &self.id)
+            .collect()
+    }
+
+    async fn get_peer_client(
+        &self,
+        peer: &Uuid,
+    ) -> Result<Arc<Mutex<VirtusClient<Channel>>>, Error> {
+        let node = match Node::get(*peer, &self.client).await.unwrap() {
+            Some(node) => node,
+            None => return Err(Error::PeerNotFound),
+        };
+
+        if let Some(client) = self.peer_clients.lock().await.get(peer) {
+            return Ok(client.clone());
+        }
+
+        match VirtusClient::connect(format!(
+            "http://{}",
+            SocketAddrV4::new(node.get_addr(), 9400)
+        ))
+        .await
+        {
+            Ok(client) => {
+                let arc = Arc::new(Mutex::new(client));
+                self.peer_clients
+                    .lock()
+                    .await
+                    .insert(peer.to_owned(), arc.clone());
+                Ok(arc)
+            }
+            Err(_) => Err(Error::PeerConnectFailed),
+        }
+    }
+
+    async fn drop_client(&self, id: Uuid) {
+        self.peer_clients.lock().await.remove(&id);
     }
 
     pub async fn start(self) -> Result<(), anyhow::Error> {
@@ -121,7 +179,63 @@ impl virtus_proto::virtus_server::Virtus for Virtus {
         &self,
         request: Request<AddPoolRequest>,
     ) -> Result<Response<AddPoolReply>, Status> {
-        todo!()
+        let (mut metadata, extensions, inner) = request.into_parts();
+        match self.skiff.get_election_state().await {
+            ElectionState::Leader => {
+                if inner.node != self.id.to_string() {
+                    match Uuid::parse_str(&inner.node) {
+                        Ok(node_id) => {
+                            let client = self.get_peer_client(&node_id).await;
+                            if let Ok(client_inner) = client {
+                                // Indicate that this is forwarded from leader
+                                // Todo: more rigorous way to indicate forwarded request
+                                metadata.append("forwarded", MetadataValue::from_static(""));
+                                return client_inner
+                                    .lock()
+                                    .await
+                                    .add_pool(Request::from_parts(metadata, extensions, inner))
+                                    .await;
+                            }
+                        }
+                        Err(_) => return Err(Status::invalid_argument("invalid node id")),
+                    }
+                }
+            }
+            ElectionState::Follower(leader) => {
+                // Check if the request is from the leader
+                if metadata.get("forwarded").is_none() {
+                    // Forward to leader
+                    let client = self.get_peer_client(&leader).await;
+                    if let Ok(client_inner) = client {
+                        return client_inner
+                            .lock()
+                            .await
+                            .add_pool(Request::from_parts(metadata, extensions, inner))
+                            .await;
+                    }
+
+                    return Err(Status::internal("failed to forward request to leader"));
+                }
+            }
+            ElectionState::Candidate => return Err(Status::internal("no skiff leader elected")),
+        }
+
+        match Pool::create(
+            self.id,
+            inner.path.as_str(),
+            inner.name.as_deref(),
+            &self.client,
+        )
+        .await
+        {
+            Ok(pool) => {
+                return Ok(Response::new(AddPoolReply {
+                    success: true,
+                    id: Some(pool.get_id().to_string()),
+                }))
+            }
+            Err(e) => return Err(Status::internal(e.to_string())),
+        }
     }
 
     async fn remove_pool(
@@ -239,6 +353,14 @@ mod tests {
             .join_cluster(vec!["127.0.0.1".parse().unwrap()])
             .build()
             .unwrap())
+    }
+
+    async fn get_client(address: &str) -> Result<VirtusClient<Channel>, anyhow::Error> {
+        Ok(VirtusClient::connect(format!(
+            "http://{}",
+            SocketAddrV4::new(address.parse().unwrap(), 9400)
+        ))
+        .await?)
     }
 
     #[tokio::test]
@@ -359,5 +481,36 @@ mod tests {
         assert_eq!(leader_cluster, follower_cluster);
         assert_eq!(2, leader_cluster.len());
         assert_eq!(2, Node::list(&leader.client).await.unwrap().len());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn add_pool_two_nodes() {
+        let leader = get_virtus().unwrap();
+        let leader_clone = leader.clone();
+        let handle = tokio::spawn(async move {
+            let _ = leader_clone.start().await;
+        });
+
+        // Give leader time to elect itself
+        // Todo: again, need more reliable method for determining when servers are ready
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+        let follower = get_follower("127.0.0.2").unwrap();
+        let follower_clone = follower.clone();
+        let _ = tokio::spawn(async move {
+            let _ = follower_clone.start().await;
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+        let mut follower_client = get_client("127.0.0.2").await.unwrap();
+        let pool = follower_client
+            .add_pool(Request::new(AddPoolRequest {
+                name: Some("test".to_string()),
+                path: "target/tmp/test/follower_pool".to_string(),
+                node: follower.id.to_string(),
+            }))
+            .await;
     }
 }

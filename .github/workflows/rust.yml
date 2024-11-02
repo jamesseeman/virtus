@@ -27,5 +27,7 @@ jobs:
         path: skiff
     - name: Build
       run: cargo build --verbose
+      working-directory: main
     - name: Run tests
       run: cargo test --verbose
+      working-directory: main

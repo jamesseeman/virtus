@@ -38,6 +38,10 @@ impl Node {
         self.id
     }
 
+    pub fn get_addr(&self) -> Ipv4Addr {
+        self.address
+    }
+
     async fn commit(&self, client: &Arc<Mutex<SkiffClient>>) -> Result<(), Error> {
         client
             .lock()

@@ -63,6 +63,7 @@ message ListNodesReply {
 message AddPoolRequest {
     optional string name = 1;
     string path = 2;
+    string node = 3;
 }
 
 message AddPoolReply {
