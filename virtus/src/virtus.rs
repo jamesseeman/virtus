@@ -587,6 +587,7 @@ mod tests {
             .await;
 
         assert_eq!(1, Pool::list(&leader.client).await.unwrap().len());
+        assert!(Path::exists(Path::new("target/tmp/test/follower_pool")))
     }
 
     #[tokio::test]
@@ -629,8 +630,14 @@ mod tests {
                 pool,
                 size: 5,
             }))
-            .await;
+            .await
+            .unwrap()
+            .into_inner()
+            .id
+            .unwrap();
 
         assert_eq!(1, Disk::list(&leader.client).await.unwrap().len());
+        let filename = format!("target/tmp/test/follower_pool/{}.qcow2", disk);
+        assert!(Path::exists(Path::new(&filename)));
     }
 }

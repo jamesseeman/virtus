@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Install protoc
-      run: sudo apt install -y protobuf-compiler
+    - name: Install dependencies
+      run: sudo apt install -y protobuf-compiler qemu-utils
     - uses: actions/checkout@v4
       with:
         path: main
