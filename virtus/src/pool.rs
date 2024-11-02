@@ -46,6 +46,10 @@ impl Pool {
         self.node_id
     }
 
+    pub fn get_path(&self) -> String {
+        self.path.clone()
+    }
+
     async fn commit(&self, client: &Arc<Mutex<SkiffClient>>) -> Result<(), Error> {
         client
             .lock()

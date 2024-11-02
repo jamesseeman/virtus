@@ -13,6 +13,10 @@ pub enum Error {
     PeerConnectFailed,
     #[error("No leader elected")]
     NoLeaderElected,
+    #[error("Pool not found")]
+    PoolNotFound,
+    #[error("Command failed: {0}")]
+    CommandFailed(String),
 }
 
 impl From<skiff::Error> for Error {

@@ -1,6 +1,9 @@
+use crate::pool::Pool;
 use crate::{error::Error, virtus::virtus_proto};
 use serde::{Deserialize, Serialize};
 use skiff::Client as SkiffClient;
+use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -22,15 +25,43 @@ impl Disk {
         name: Option<&str>,
         client: &Arc<Mutex<SkiffClient>>,
     ) -> Result<Self, Error> {
-        let disk = Self {
-            id: Uuid::new_v4(),
-            pool_id,
-            name: name.map(|s| s.to_string()),
-            size,
+        let pool = match Pool::get(pool_id, client).await? {
+            Some(pool) => pool,
+            None => return Err(Error::PoolNotFound),
         };
 
-        disk.commit(client).await?;
-        Ok(disk)
+        let disk_id = Uuid::new_v4();
+
+        let filename = Path::join(
+            Path::new(&pool.get_path()),
+            Path::new(&format!("{}.qcow2", disk_id)),
+        );
+
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "qemu-img create -f qcow2 {} {}",
+                filename.to_str().unwrap(),
+                size
+            ))
+            .output()?;
+
+        match output.status.success() {
+            true => {
+                let disk = Self {
+                    id: disk_id,
+                    pool_id,
+                    name: name.map(|s| s.to_string()),
+                    size,
+                };
+
+                disk.commit(client).await?;
+                Ok(disk)
+            }
+            false => Err(Error::CommandFailed(
+                String::from_utf8(output.stderr).unwrap(),
+            )),
+        }
     }
 
     pub fn get_id(&self) -> Uuid {

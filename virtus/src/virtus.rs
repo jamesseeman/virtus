@@ -180,25 +180,32 @@ impl virtus_proto::virtus_server::Virtus for Virtus {
         request: Request<AddPoolRequest>,
     ) -> Result<Response<AddPoolReply>, Status> {
         let (mut metadata, extensions, inner) = request.into_parts();
+
+        let node_id = match Uuid::parse_str(&inner.node) {
+            Ok(id) => id,
+            Err(_) => return Err(Status::invalid_argument("Invalid node ID")),
+        };
+
+        if Node::get(node_id, &self.client).await.unwrap().is_none() {
+            return Err(Status::invalid_argument("Node not found"));
+        }
+
         match self.skiff.get_election_state().await {
             ElectionState::Leader => {
                 if inner.node != self.id.to_string() {
-                    match Uuid::parse_str(&inner.node) {
-                        Ok(node_id) => {
-                            let client = self.get_peer_client(&node_id).await;
-                            if let Ok(client_inner) = client {
-                                // Indicate that this is forwarded from leader
-                                // Todo: more rigorous way to indicate forwarded request
-                                metadata.append("forwarded", MetadataValue::from_static(""));
-                                return client_inner
-                                    .lock()
-                                    .await
-                                    .add_pool(Request::from_parts(metadata, extensions, inner))
-                                    .await;
-                            }
-                        }
-                        Err(_) => return Err(Status::invalid_argument("invalid node id")),
+                    let client = self.get_peer_client(&node_id).await;
+                    if let Ok(client_inner) = client {
+                        // Indicate that this is forwarded from leader
+                        // Todo: more rigorous way to indicate forwarded request
+                        metadata.append("forwarded", MetadataValue::from_static(""));
+                        return client_inner
+                            .lock()
+                            .await
+                            .add_pool(Request::from_parts(metadata, extensions, inner))
+                            .await;
                     }
+
+                    return Err(Status::internal("failed to connect to node"));
                 }
             }
             ElectionState::Follower(leader) => {
@@ -278,7 +285,73 @@ impl virtus_proto::virtus_server::Virtus for Virtus {
         &self,
         request: Request<AddDiskRequest>,
     ) -> Result<Response<AddDiskReply>, Status> {
-        todo!()
+        let (mut metadata, extensions, inner) = request.into_parts();
+
+        let pool_id = match Uuid::parse_str(&inner.pool) {
+            Ok(id) => id,
+            Err(_) => return Err(Status::invalid_argument("Invalid pool ID")),
+        };
+
+        let pool = match Pool::get(pool_id, &self.client).await.unwrap() {
+            Some(pool) => pool,
+            None => return Err(Status::invalid_argument("Pool not found")),
+        };
+
+        let node_id = pool.get_node_id();
+
+        match self.skiff.get_election_state().await {
+            ElectionState::Leader => {
+                if node_id != self.id {
+                    let client = self.get_peer_client(&node_id).await;
+                    if let Ok(client_inner) = client {
+                        // Indicate that this is forwarded from leader
+                        // Todo: more rigorous way to indicate forwarded request
+                        metadata.append("forwarded", MetadataValue::from_static(""));
+                        return client_inner
+                            .lock()
+                            .await
+                            .add_disk(Request::from_parts(metadata, extensions, inner))
+                            .await;
+                    }
+
+                    return Err(Status::internal("failed to connect to node"));
+                }
+            }
+            ElectionState::Follower(leader) => {
+                // Check if the request is from the leader
+                if metadata.get("forwarded").is_none() {
+                    // Forward to leader
+                    let client = self.get_peer_client(&leader).await;
+                    if let Ok(client_inner) = client {
+                        return client_inner
+                            .lock()
+                            .await
+                            .add_disk(Request::from_parts(metadata, extensions, inner))
+                            .await;
+                    }
+
+                    return Err(Status::internal("failed to forward request to leader"));
+                }
+            }
+            ElectionState::Candidate => return Err(Status::internal("no skiff leader elected")),
+        }
+
+        match Disk::create(
+            pool_id,
+            inner.size as usize,
+            inner.name.as_deref(),
+            &self.client,
+        )
+        .await
+        {
+            Ok(disk) => {
+                return Ok(Response::new(AddDiskReply {
+                    success: true,
+                    id: Some(disk.get_id().to_string()),
+                }))
+            }
+            Err(e) => return Err(Status::internal(e.to_string())),
+        }
     }
 
     async fn remove_disk(
@@ -330,8 +403,8 @@ mod tests {
 
     fn get_virtus() -> Result<Virtus, anyhow::Error> {
         let dir = String::from("target/tmp/test/127.0.0.1");
-        if Path::exists(Path::new(&dir)) {
-            fs::remove_dir_all(&dir)?;
+        if Path::exists(Path::new("target/tmp/test")) {
+            fs::remove_dir_all("target/tmp/test")?;
         }
 
         Ok(Builder::new()
@@ -512,5 +585,52 @@ mod tests {
                 node: follower.id.to_string(),
             }))
             .await;
+
+        assert_eq!(1, Pool::list(&leader.client).await.unwrap().len());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn add_disk_two_nodes() {
+        let leader = get_virtus().unwrap();
+        let leader_clone = leader.clone();
+        let handle = tokio::spawn(async move {
+            let _ = leader_clone.start().await;
+        });
+
+        // Give leader time to elect itself
+        // Todo: again, need more reliable method for determining when servers are ready
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+        let follower = get_follower("127.0.0.2").unwrap();
+        let follower_clone = follower.clone();
+        let _ = tokio::spawn(async move {
+            let _ = follower_clone.start().await;
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+        let mut follower_client = get_client("127.0.0.2").await.unwrap();
+        let pool = follower_client
+            .add_pool(Request::new(AddPoolRequest {
+                name: Some("test".to_string()),
+                path: "target/tmp/test/follower_pool".to_string(),
+                node: follower.id.to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+            .id
+            .unwrap();
+
+        let disk = follower_client
+            .add_disk(Request::new(AddDiskRequest {
+                name: Some("test_disk".into()),
+                pool,
+                size: 5,
+            }))
+            .await;
+
+        assert_eq!(1, Disk::list(&leader.client).await.unwrap().len());
     }
 }
