@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 skiff = { path = "../../skiff" }
+bpflan-rs = { path = "../../bpflan" }
 anyhow = "1.0.91"
 thiserror = "1.0"
 prost = "0.13.1"

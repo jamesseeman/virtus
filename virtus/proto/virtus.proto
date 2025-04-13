@@ -16,6 +16,16 @@ service Virtus {
   rpc RemoveDisk(RemoveDiskRequest) returns (RemoveDiskReply);
   rpc GetDisk(GetDiskRequest) returns (GetDiskReply);
   rpc ListDisks(Empty) returns (ListDisksReply);
+
+  rpc AddNetwork(AddNetworkRequest) returns (AddNetworkReply);
+  rpc RemoveNetwork(RemoveNetworkRequest) returns (RemoveNetworkReply);
+  rpc GetNetwork(GetNetworkRequest) returns (GetNetworkReply);
+  rpc ListNetworks(Empty) returns (ListNetworksReply);
+
+  // rpc AddVM(AddVMRequest) returns (AddVMReply);
+  // rpc RemoveVM(RemoveVMRequest) returns (RemoveVMReply);
+  // rpc GetVM(GetVMRequest) returns (GetVMReply);
+  // rpc ListVMs(Empty) returns (ListVMsReply);
 }
 
 message Empty {}
@@ -102,7 +112,7 @@ message ListPoolsReply {
 message AddDiskRequest {
     string pool = 1;
     optional string name = 2;
-    uint64 size = 3;
+    uint64 size_gb = 3;
     // optional string source 4;
 }
 
@@ -127,7 +137,7 @@ message Disk {
     string id = 1;
     string pool = 2;
     optional string name = 3;
-    uint64 size = 4;
+    uint64 size_gb = 4;
     // optional string source = 5;
 }
 
@@ -137,4 +147,38 @@ message GetDiskReply {
 
 message ListDisksReply {
     repeated string disks = 1;
+}
+
+message AddNetworkRequest {
+    optional string name = 1;
+}
+
+message AddNetworkReply {
+    bool success = 1;
+    optional string id = 2;
+}
+
+message RemoveNetworkRequest {
+    string id = 1;
+}
+
+message RemoveNetworkReply {
+    bool success = 1;
+}
+
+message GetNetworkRequest {
+    string id = 1;
+}
+
+message Network {
+    string id = 1;
+    optional string name = 2;
+}
+
+message GetNetworkReply {
+    optional Network network = 1;
+}
+
+message ListNetworksReply {
+    repeated string networks = 1;
 }

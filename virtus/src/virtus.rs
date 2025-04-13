@@ -338,7 +338,7 @@ impl virtus_proto::virtus_server::Virtus for Virtus {
 
         match Disk::create(
             pool_id,
-            inner.size as usize,
+            inner.size_gb as usize,
             inner.name.as_deref(),
             &self.client,
         )
@@ -388,6 +388,34 @@ impl virtus_proto::virtus_server::Virtus for Virtus {
             })),
             Err(e) => return Err(Status::internal(e.to_string())),
         }
+    }
+
+    async fn add_network(
+        &self,
+        request: Request<AddNetworkRequest>,
+    ) -> Result<Response<AddNetworkReply>, Status> {
+        todo!()
+    }
+
+    async fn remove_network(
+        &self,
+        request: Request<RemoveNetworkRequest>,
+    ) -> Result<Response<RemoveNetworkReply>, Status> {
+        todo!()
+    }
+
+    async fn get_network(
+        &self,
+        request: Request<GetNetworkRequest>,
+    ) -> Result<Response<GetNetworkReply>, Status> {
+        todo!()
+    }
+
+    async fn list_networks(
+        &self,
+        request: Request<Empty>,
+    ) -> Result<Response<ListNetworksReply>, Status> {
+        todo!()
     }
 }
 
@@ -628,7 +656,7 @@ mod tests {
             .add_disk(Request::new(AddDiskRequest {
                 name: Some("test_disk".into()),
                 pool,
-                size: 5,
+                size_gb: 1,
             }))
             .await
             .unwrap()

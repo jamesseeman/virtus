@@ -13,7 +13,7 @@ pub struct Disk {
     id: Uuid,
     pool_id: Uuid,
     name: Option<String>,
-    size: usize,
+    size_gb: usize,
     // source: Option<Image>,
     // snapshots: Vec<Snapshot>,
 }
@@ -21,7 +21,7 @@ pub struct Disk {
 impl Disk {
     pub async fn create(
         pool_id: Uuid,
-        size: usize,
+        size_gb: usize,
         name: Option<&str>,
         client: &Arc<Mutex<SkiffClient>>,
     ) -> Result<Self, Error> {
@@ -37,12 +37,13 @@ impl Disk {
             Path::new(&format!("{}.qcow2", disk_id)),
         );
 
+        // Todo: check if filesystem has enough space
         let output = Command::new("sh")
             .arg("-c")
             .arg(format!(
-                "qemu-img create -f qcow2 {} {}",
+                "qemu-img create -f qcow2 {} {}G",
                 filename.to_str().unwrap(),
-                size
+                size_gb,
             ))
             .output()?;
 
@@ -52,7 +53,7 @@ impl Disk {
                     id: disk_id,
                     pool_id,
                     name: name.map(|s| s.to_string()),
-                    size,
+                    size_gb,
                 };
 
                 disk.commit(client).await?;
@@ -118,7 +119,7 @@ impl From<Disk> for virtus_proto::Disk {
             id: val.id.to_string(),
             pool: val.pool_id.to_string(),
             name: val.name,
-            size: val.size as u64,
+            size_gb: val.size_gb as u64,
         }
     }
 }
